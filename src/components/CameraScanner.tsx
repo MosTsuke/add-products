@@ -8,6 +8,7 @@ interface Props {
 }
 
 type ScanState = 'starting' | 'scanning' | 'error';
+type ScanEngine = 'native' | 'zxing' | null;
 
 declare global {
   interface Window {
@@ -15,6 +16,17 @@ declare global {
       detect: (source: HTMLVideoElement | ImageBitmap | ImageData) => Promise<
         Array<{ rawValue: string; format: string }>
       >;
+      getSupportedFormats?: () => Promise<string[]>;
+    } & { getSupportedFormats?: () => Promise<string[]> };
+    ZXing?: {
+      BrowserMultiFormatReader: new () => {
+        decodeFromVideoDevice: (
+          deviceId: string | null,
+          videoEl: HTMLVideoElement,
+          callback: (result: { getText: () => string } | null, err?: unknown) => void
+        ) => Promise<void>;
+        reset: () => void;
+      };
     };
   }
 }
@@ -24,17 +36,34 @@ const BARCODE_FORMATS = [
   'qr_code', 'upc_a', 'upc_e', 'itf',
 ];
 
+const ZXING_CDN = 'https://unpkg.com/@zxing/library@0.20.0/umd/index.min.js';
+
+function loadZXing(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (window.ZXing) { resolve(); return; }
+    const s = document.createElement('script');
+    s.src = ZXING_CDN;
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error('โหลด ZXing ไม่สำเร็จ'));
+    document.head.appendChild(s);
+  });
+}
+
 export default function CameraScanner({ onScan, onClose }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const rafRef = useRef<number>(0);
-  const detectorRef = useRef<InstanceType<NonNullable<Window['BarcodeDetector']>> | null>(null);
+  const nativeDetectorRef = useRef<InstanceType<NonNullable<Window['BarcodeDetector']>> | null>(null);
+  const zxingReaderRef = useRef<InstanceType<NonNullable<Window['ZXing']>['BrowserMultiFormatReader']> | null>(null);
+  const engineRef = useRef<ScanEngine>(null);
   const [scanState, setScanState] = useState<ScanState>('starting');
   const [errorMsg, setErrorMsg] = useState('');
   const scannedRef = useRef(false);
 
   const stopCamera = useCallback(() => {
     cancelAnimationFrame(rafRef.current);
+    zxingReaderRef.current?.reset();
+    zxingReaderRef.current = null;
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(t => t.stop());
       streamRef.current = null;
@@ -46,79 +75,105 @@ export default function CameraScanner({ onScan, onClose }: Props) {
     onClose();
   }, [stopCamera, onClose]);
 
-  const startScan = useCallback(async () => {
-    setScanState('starting');
-    setErrorMsg('');
-    scannedRef.current = false;
-
-    // Check BarcodeDetector support
-    if (!window.BarcodeDetector) {
-      setScanState('error');
-      setErrorMsg('เบราว์เซอร์นี้ยังไม่รองรับการสแกน — กรุณาใช้ Chrome บน Android หรือ Safari iOS 17+');
-      return;
-    }
-
-    // Init detector
-    try {
-      const supported = await (window.BarcodeDetector as { getSupportedFormats?: () => Promise<string[]> })
-        .getSupportedFormats?.() ?? BARCODE_FORMATS;
-      const formats = BARCODE_FORMATS.filter(f => supported.includes(f));
-      detectorRef.current = new window.BarcodeDetector({ formats: formats.length ? formats : BARCODE_FORMATS });
-    } catch {
-      detectorRef.current = new window.BarcodeDetector({ formats: BARCODE_FORMATS });
-    }
-
-    // Get camera
+  const openCamera = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
         audio: false,
       });
       streamRef.current = stream;
-
       if (!videoRef.current) return;
       videoRef.current.srcObject = stream;
       await videoRef.current.play();
-      setScanState('scanning');
-
-      // Scan loop
-      const scan = async () => {
-        if (scannedRef.current || !videoRef.current || !detectorRef.current) return;
-        if (videoRef.current.readyState >= 2) {
-          try {
-            const results = await detectorRef.current.detect(videoRef.current);
-            if (results.length > 0 && !scannedRef.current) {
-              scannedRef.current = true;
-              stopCamera();
-              onScan(results[0].rawValue);
-              return;
-            }
-          } catch {
-            // ignore frame errors
-          }
-        }
-        rafRef.current = requestAnimationFrame(scan);
-      };
-      rafRef.current = requestAnimationFrame(scan);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      setScanState('error');
       if (msg.includes('Permission') || msg.includes('NotAllowed')) {
-        setErrorMsg('ไม่ได้รับอนุญาตใช้กล้อง — กรุณาอนุญาตในการตั้งค่าเบราว์เซอร์');
+        throw new Error('ไม่ได้รับอนุญาตใช้กล้อง — กรุณาอนุญาตในการตั้งค่าเบราว์เซอร์');
       } else if (msg.includes('NotFound') || msg.includes('DevicesNotFound')) {
-        setErrorMsg('ไม่พบกล้องในอุปกรณ์นี้');
+        throw new Error('ไม่พบกล้องในอุปกรณ์นี้');
       } else {
-        setErrorMsg(`ไม่สามารถเปิดกล้องได้: ${msg}`);
+        throw new Error(`ไม่สามารถเปิดกล้องได้: ${msg}`);
       }
     }
+  }, []);
+
+  const startNativeScan = useCallback(() => {
+    const scan = async () => {
+      if (scannedRef.current || !videoRef.current || !nativeDetectorRef.current) return;
+      if (videoRef.current.readyState >= 2) {
+        try {
+          const results = await nativeDetectorRef.current.detect(videoRef.current);
+          if (results.length > 0 && !scannedRef.current) {
+            scannedRef.current = true;
+            stopCamera();
+            onScan(results[0].rawValue);
+            return;
+          }
+        } catch { /* ignore frame errors */ }
+      }
+      rafRef.current = requestAnimationFrame(scan);
+    };
+    rafRef.current = requestAnimationFrame(scan);
   }, [stopCamera, onScan]);
+
+  const startZXingScan = useCallback(async () => {
+    if (!window.ZXing || !videoRef.current) return;
+    const reader = new window.ZXing.BrowserMultiFormatReader();
+    zxingReaderRef.current = reader;
+    await reader.decodeFromVideoDevice(null, videoRef.current, (result, err) => {
+      if (result && !scannedRef.current) {
+        scannedRef.current = true;
+        stopCamera();
+        onScan(result.getText());
+      }
+      if (err && !(err instanceof Error && err.message?.includes('No MultiFormat'))) {
+        // ignore normal "no barcode found" errors from ZXing
+      }
+    });
+  }, [stopCamera, onScan]);
+
+  const startScan = useCallback(async () => {
+    setScanState('starting');
+    setErrorMsg('');
+    scannedRef.current = false;
+
+    try {
+      // ตรวจ engine ที่ใช้ได้
+      if (window.BarcodeDetector) {
+        engineRef.current = 'native';
+        try {
+          const BD = window.BarcodeDetector as unknown as { getSupportedFormats?: () => Promise<string[]> };
+          const supported = await BD.getSupportedFormats?.() ?? BARCODE_FORMATS;
+          const formats = BARCODE_FORMATS.filter(f => supported.includes(f));
+          nativeDetectorRef.current = new window.BarcodeDetector({ formats: formats.length ? formats : BARCODE_FORMATS });
+        } catch {
+          nativeDetectorRef.current = new window.BarcodeDetector({ formats: BARCODE_FORMATS });
+        }
+      } else {
+        // Fallback: โหลด ZXing จาก CDN
+        engineRef.current = 'zxing';
+        await loadZXing();
+      }
+
+      await openCamera();
+      setScanState('scanning');
+
+      if (engineRef.current === 'native') {
+        startNativeScan();
+      } else {
+        await startZXingScan();
+      }
+    } catch (err: unknown) {
+      setScanState('error');
+      setErrorMsg(err instanceof Error ? err.message : 'เกิดข้อผิดพลาด');
+    }
+  }, [openCamera, startNativeScan, startZXingScan]);
 
   useEffect(() => {
     startScan();
     return () => stopCamera();
   }, [startScan, stopCamera]);
 
-  // Close on Escape
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') handleClose(); };
     window.addEventListener('keydown', onKey);
@@ -128,30 +183,18 @@ export default function CameraScanner({ onScan, onClose }: Props) {
   return (
     <div className="camera-scanner-overlay" onClick={handleClose}>
       <div className="camera-scanner-panel" onClick={e => e.stopPropagation()}>
-        {/* Header */}
         <div className="camera-scanner-header">
           <div className="camera-scanner-title">
             <Camera size={18} strokeWidth={2} aria-hidden />
             <span>สแกน Barcode</span>
           </div>
-          <button
-            className="camera-scanner-close"
-            onClick={handleClose}
-            aria-label="ปิด"
-          >
+          <button className="camera-scanner-close" onClick={handleClose} aria-label="ปิด">
             <X size={20} strokeWidth={2} />
           </button>
         </div>
 
-        {/* Viewfinder */}
         <div className="camera-scanner-viewfinder">
-          <video
-            ref={videoRef}
-            className="camera-scanner-video"
-            playsInline
-            muted
-            autoPlay
-          />
+          <video ref={videoRef} className="camera-scanner-video" playsInline muted autoPlay />
 
           {scanState === 'scanning' && (
             <div className="camera-scanner-aim">
