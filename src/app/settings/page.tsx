@@ -29,7 +29,7 @@ import {
 
 function parseBulkInput(text: string): string[] {
   const parts = text.split(/[\n,]+/).map(s => s.trim()).filter(Boolean);
-  return [...new Set(parts)];
+  return Array.from(new Set(parts));
 }
 
 const ICON_SIZES = { sm: 16, md: 20, lg: 26, xl: 32 } as const;
