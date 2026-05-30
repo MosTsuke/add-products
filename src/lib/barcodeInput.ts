@@ -74,17 +74,15 @@ export function handleBarcodeInputKeyDown(
   setValue: (next: string) => void,
   options?: { onEnter?: () => void }
 ): void {
-  const ne = e.nativeEvent;
-
-  if (isBarcodeEnter(ne)) {
+  if (isBarcodeEnter(e)) {
     e.preventDefault();
     options?.onEnter?.();
     return;
   }
 
-  if (BARCODE_NAV_KEYS.has(ne.key) || ne.key.startsWith('Arrow')) return;
+  if (BARCODE_NAV_KEYS.has(e.key) || e.key.startsWith('Arrow')) return;
 
-  const ch = barcodeCharFromKeyEvent(ne);
+  const ch = barcodeCharFromKeyEvent(e);
   if (ch !== null) {
     e.preventDefault();
     const piece = normalizeBarcodeInput(ch);
