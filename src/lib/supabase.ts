@@ -7,6 +7,25 @@ export const supabase = createClient(url, key);
 
 export type DropdownType = 'category' | 'product_type' | 'unit' | 'price_type';
 
+/** ref: 0=ทั้งหมด · 1=ร้านแรก · 2=ร้านที่สอง */
+export interface CategoryOption {
+  value: string;
+  ref: number;
+}
+
+export const STORE_REF_LABELS: Record<number, string> = {
+  0: 'ทั้งหมด',
+  1: 'ร้านแรก',
+  2: 'ร้านที่สอง',
+};
+
+/** สีของแต่ละ ref (Tailwind-style hex) */
+export const STORE_REF_COLORS: Record<number, string> = {
+  0: '#9ca3af', // gray-400
+  1: '#3b82f6', // blue-500
+  2: '#f97316', // orange-500
+};
+
 export async function fetchOptions(type: DropdownType): Promise<string[]> {
   const { data, error } = await supabase
     .from('dropdown_options')
@@ -17,18 +36,53 @@ export async function fetchOptions(type: DropdownType): Promise<string[]> {
   return data.map((r: { value: string }) => r.value);
 }
 
-export async function addOption(type: DropdownType, value: string): Promise<void> {
-  const { error } = await supabase
+/** โหลด category พร้อม ref */
+export async function fetchCategoryOptions(): Promise<CategoryOption[]> {
+  const { data, error } = await supabase
     .from('dropdown_options')
-    .insert({ type, value });
+    .select('value, ref')
+    .eq('type', 'category')
+    .order('value');
+  if (error) throw error;
+  return data.map((r: { value: string; ref: number }) => ({
+    value: r.value,
+    ref: r.ref ?? 0,
+  }));
+}
+
+export async function addOption(
+  type: DropdownType,
+  value: string,
+  ref = 0
+): Promise<void> {
+  const row: Record<string, unknown> = { type, value };
+  if (type === 'category') row.ref = ref;
+  const { error } = await supabase.from('dropdown_options').insert(row);
   if (error) throw error;
 }
 
-export async function addOptions(type: DropdownType, values: string[]): Promise<void> {
+export async function addOptions(
+  type: DropdownType,
+  values: string[],
+  ref = 0
+): Promise<void> {
   if (values.length === 0) return;
+  const rows = values.map(value => {
+    const row: Record<string, unknown> = { type, value };
+    if (type === 'category') row.ref = ref;
+    return row;
+  });
+  const { error } = await supabase.from('dropdown_options').insert(rows);
+  if (error) throw error;
+}
+
+/** แก้ ref ของ category ที่มีอยู่แล้ว */
+export async function updateCategoryRef(value: string, ref: number): Promise<void> {
   const { error } = await supabase
     .from('dropdown_options')
-    .insert(values.map(value => ({ type, value })));
+    .update({ ref })
+    .eq('type', 'category')
+    .eq('value', value);
   if (error) throw error;
 }
 

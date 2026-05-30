@@ -21,10 +21,15 @@ import Navbar from '@/components/Navbar';
 import {
   supabase,
   fetchOptions,
+  fetchCategoryOptions,
   addOption,
   addOptions,
   deleteOption,
+  updateCategoryRef,
   DropdownType,
+  CategoryOption,
+  STORE_REF_LABELS,
+  STORE_REF_COLORS,
 } from '@/lib/supabase';
 
 function parseBulkInput(text: string): string[] {
@@ -96,6 +101,37 @@ const SECTIONS: {
     defaults: ['ราคาปกติ', 'ราคาส่ง', 'ราคาพิเศษ'],
   },
 ];
+
+function RefBadge({ refVal, size = 'sm' }: { refVal: number; size?: 'sm' | 'md' }) {
+  const color = STORE_REF_COLORS[refVal] ?? STORE_REF_COLORS[0];
+  const label = STORE_REF_LABELS[refVal] ?? 'ทั้งหมด';
+  const dotSize = size === 'md' ? 10 : 8;
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, flexShrink: 0 }} title={label}>
+      <span style={{ width: dotSize, height: dotSize, borderRadius: '50%', background: color, display: 'inline-block' }} aria-hidden />
+      {size === 'md' && <span style={{ fontSize: 11, color: '#666', fontWeight: 500 }}>{label}</span>}
+    </span>
+  );
+}
+
+function RefSelector({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+  return (
+    <div className="settings-ref-selector" role="group" aria-label="ร้าน">
+      {[0, 1, 2].map(ref => (
+        <button
+          key={ref}
+          type="button"
+          className={`settings-ref-btn${value === ref ? ' settings-ref-btn--active' : ''}`}
+          style={value === ref ? { borderColor: STORE_REF_COLORS[ref], color: STORE_REF_COLORS[ref], background: `${STORE_REF_COLORS[ref]}14` } : {}}
+          onClick={() => onChange(ref)}
+        >
+          <span style={{ width: 8, height: 8, borderRadius: '50%', background: STORE_REF_COLORS[ref], display: 'inline-block' }} aria-hidden />
+          {STORE_REF_LABELS[ref]}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 function BulkAddModal({
   label,
@@ -269,9 +305,12 @@ interface OptionSectionProps {
   accent: Accent;
   items: string[];
   loading: boolean;
-  onAdd: (type: DropdownType, value: string) => Promise<void>;
-  onBulkAdd: (type: DropdownType, values: string[]) => Promise<void>;
+  onAdd: (type: DropdownType, value: string, ref?: number) => Promise<void>;
+  onBulkAdd: (type: DropdownType, values: string[], ref?: number) => Promise<void>;
   onDelete: (type: DropdownType, value: string) => Promise<void>;
+  /** เฉพาะ category */
+  refMap?: Map<string, number>;
+  onRefChange?: (value: string, ref: number) => Promise<void>;
 }
 
 function OptionSection({
@@ -284,19 +323,34 @@ function OptionSection({
   onAdd,
   onBulkAdd,
   onDelete,
+  refMap,
+  onRefChange,
 }: OptionSectionProps) {
   const [input, setInput] = useState('');
+  const [addRef, setAddRef] = useState(0);
+  const [filterRef, setFilterRef] = useState<number | null>(null); // null = ทั้งหมด
   const [search, setSearch] = useState('');
   const [adding, setAdding] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [message, setMessage] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
+  const isCategory = type === 'category';
 
   const filtered = useMemo(() => {
+    let result = items;
+    // กรองตาม ref (เฉพาะ category)
+    if (isCategory && filterRef !== null && refMap) {
+      result = result.filter(item => {
+        const r = refMap.get(item) ?? 0;
+        // ref=0 (ทั้งหมด) แสดงในทุก filter · ref=1/2 แสดงเฉพาะ filter นั้น
+        return r === 0 || r === filterRef;
+      });
+    }
+    // กรองตาม search
     const q = search.trim().toLowerCase();
-    if (!q) return items;
-    return items.filter(item => item.toLowerCase().includes(q));
-  }, [items, search]);
+    if (q) result = result.filter(item => item.toLowerCase().includes(q));
+    return result;
+  }, [items, search, isCategory, filterRef, refMap]);
 
   const showMessage = (type: 'ok' | 'err', text: string) => {
     setMessage({ type, text });
@@ -312,7 +366,7 @@ function OptionSection({
     }
     setAdding(true);
     try {
-      await onAdd(type, v);
+      await onAdd(type, v, isCategory ? addRef : undefined);
       setInput('');
       showMessage('ok', `เพิ่ม "${v}" แล้ว`);
     } catch {
@@ -352,6 +406,32 @@ function OptionSection({
             <span className="settings-count-label">รายการ</span>
           </div>
         </div>
+
+        {isCategory && (
+          <div className="settings-ref-filter-bar">
+            <button
+              type="button"
+              className={`settings-ref-btn${filterRef === null ? ' settings-ref-btn--active' : ''}`}
+              style={filterRef === null ? { borderColor: '#9ca3af', color: '#9ca3af', background: '#9ca3af14' } : {}}
+              onClick={() => { setFilterRef(null); setAddRef(0); }}
+            >
+              ทั้งหมด
+            </button>
+            {[1, 2].map(r => (
+              <button
+                key={r}
+                type="button"
+                className={`settings-ref-btn${filterRef === r ? ' settings-ref-btn--active' : ''}`}
+                style={filterRef === r ? { borderColor: STORE_REF_COLORS[r], color: STORE_REF_COLORS[r], background: `${STORE_REF_COLORS[r]}14` } : {}}
+                onClick={() => { setFilterRef(r); setAddRef(r); }}
+              >
+                <span style={{ width: 8, height: 8, borderRadius: '50%', background: STORE_REF_COLORS[r], display: 'inline-block' }} aria-hidden />
+                {STORE_REF_LABELS[r]}
+              </button>
+            ))}
+            <span className="settings-ref-filter-count">{filtered.length} รายการ</span>
+          </div>
+        )}
 
         <div className={`settings-composer settings-composer--${accent}`}>
           <div className="settings-input-wrap">
@@ -464,19 +544,37 @@ function OptionSection({
 
           {!loading && filtered.length > 0 && (
             <div className="settings-chips">
-              {filtered.map(item => (
-                <div key={item} className={`settings-chip settings-chip--${accent}`}>
-                  <span>{item}</span>
-                  <button
-                    type="button"
-                    className="settings-chip-remove"
-                    onClick={() => setPendingDelete(item)}
-                    aria-label={`ลบ ${item}`}
-                  >
-                    <X size={14} strokeWidth={2.5} />
-                  </button>
-                </div>
-              ))}
+              {filtered.map(item => {
+                const itemRef = refMap?.get(item) ?? 0;
+                return (
+                  <div key={item} className={`settings-chip settings-chip--${accent}`}>
+                    {isCategory && (
+                      <select
+                        className="settings-chip-ref-select"
+                        value={itemRef}
+                        onChange={e => onRefChange?.(item, Number(e.target.value))}
+                        title="เปลี่ยนร้าน"
+                        aria-label={`ร้านของ ${item}`}
+                        style={{ color: STORE_REF_COLORS[itemRef] }}
+                      >
+                        {[0, 1, 2].map(r => (
+                          <option key={r} value={r}>{STORE_REF_LABELS[r]}</option>
+                        ))}
+                      </select>
+                    )}
+                    {isCategory && <RefBadge refVal={itemRef} />}
+                    <span>{item}</span>
+                    <button
+                      type="button"
+                      className="settings-chip-remove"
+                      onClick={() => setPendingDelete(item)}
+                      aria-label={`ลบ ${item}`}
+                    >
+                      <X size={14} strokeWidth={2.5} />
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
@@ -496,7 +594,7 @@ function OptionSection({
           onCancel={() => setBulkOpen(false)}
           onConfirm={async values => {
             try {
-              await onBulkAdd(type, values);
+              await onBulkAdd(type, values, isCategory ? addRef : undefined);
               showMessage('ok', `เพิ่ม ${values.length} รายการแล้ว`);
             } catch {
               showMessage('err', 'เพิ่มไม่สำเร็จ — ลองอีกครั้ง');
@@ -526,22 +624,29 @@ export default function Settings() {
     unit: [],
     price_type: [],
   });
+  const [categoryOptions, setCategoryOptions] = useState<CategoryOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [seeding, setSeeding] = useState(false);
   const [error, setError] = useState('');
+
+  const refMap = useMemo(
+    () => new Map(categoryOptions.map(o => [o.value, o.ref])),
+    [categoryOptions]
+  );
 
   const loadAll = async () => {
     setLoading(true);
     setError('');
     try {
-      const [categories, productTypes, units, priceTypes] = await Promise.all([
-        fetchOptions('category'),
+      const [catOpts, productTypes, units, priceTypes] = await Promise.all([
+        fetchCategoryOptions(),
         fetchOptions('product_type'),
         fetchOptions('unit'),
         fetchOptions('price_type'),
       ]);
+      setCategoryOptions(catOpts);
       setData({
-        category: categories,
+        category: catOpts.map(o => o.value).sort(),
         product_type: productTypes,
         unit: units,
         price_type: priceTypes,
@@ -558,15 +663,21 @@ export default function Settings() {
     loadAll();
   }, []);
 
-  const handleAdd = async (type: DropdownType, value: string) => {
-    await addOption(type, value);
+  const handleAdd = async (type: DropdownType, value: string, ref = 0) => {
+    await addOption(type, value, ref);
+    if (type === 'category') {
+      setCategoryOptions(prev => [...prev, { value, ref }].sort((a, b) => a.value.localeCompare(b.value)));
+    }
     setData(prev => ({ ...prev, [type]: [...prev[type], value].sort() }));
   };
 
-  const handleBulkAdd = async (type: DropdownType, values: string[]) => {
+  const handleBulkAdd = async (type: DropdownType, values: string[], ref = 0) => {
     const newValues = values.filter(v => !data[type].includes(v));
     if (newValues.length === 0) return;
-    await addOptions(type, newValues);
+    await addOptions(type, newValues, ref);
+    if (type === 'category') {
+      setCategoryOptions(prev => [...prev, ...newValues.map(v => ({ value: v, ref }))].sort((a, b) => a.value.localeCompare(b.value)));
+    }
     setData(prev => ({
       ...prev,
       [type]: [...prev[type], ...newValues].sort(),
@@ -575,7 +686,15 @@ export default function Settings() {
 
   const handleDelete = async (type: DropdownType, value: string) => {
     await deleteOption(type, value);
+    if (type === 'category') {
+      setCategoryOptions(prev => prev.filter(o => o.value !== value));
+    }
     setData(prev => ({ ...prev, [type]: prev[type].filter(v => v !== value) }));
+  };
+
+  const handleRefChange = async (value: string, ref: number) => {
+    await updateCategoryRef(value, ref);
+    setCategoryOptions(prev => prev.map(o => o.value === value ? { ...o, ref } : o));
   };
 
   const seedDefaults = async () => {
@@ -713,6 +832,8 @@ export default function Settings() {
                 onAdd={handleAdd}
                 onBulkAdd={handleBulkAdd}
                 onDelete={handleDelete}
+                refMap={activeSection.type === 'category' ? refMap : undefined}
+                onRefChange={activeSection.type === 'category' ? handleRefChange : undefined}
               />
             </div>
           </div>

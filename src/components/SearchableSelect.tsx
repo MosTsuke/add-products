@@ -14,6 +14,27 @@ interface SearchableSelectProps {
   compact?: boolean;
   /** tooltip เมื่อชี้ — มักใส่ค่าที่เลือกเต็มๆ */
   inputTitle?: string;
+  /** map ของ option → ref number เพื่อแสดง dot สี (0=gray, 1=blue, 2=orange) */
+  optionMeta?: Map<string, number>;
+  /** ซ่อน label element (ใช้เมื่อ parent render label เอง) */
+  hideLabel?: boolean;
+}
+
+const REF_COLORS: Record<number, string> = {
+  0: '#9ca3af',
+  1: '#3b82f6',
+  2: '#f97316',
+};
+
+function RefDot({ storeRef, inline = false }: { storeRef: number; inline?: boolean }) {
+  const color = REF_COLORS[storeRef] ?? REF_COLORS[0];
+  return (
+    <span
+      className={inline ? 'searchable-select-ref-dot--inline' : 'searchable-select-ref-dot'}
+      style={{ background: color }}
+      aria-hidden
+    />
+  );
 }
 
 export default function SearchableSelect({
@@ -26,6 +47,8 @@ export default function SearchableSelect({
   disabled = false,
   compact = false,
   inputTitle,
+  optionMeta,
+  hideLabel = false,
 }: SearchableSelectProps) {
   const listId = useId();
   const rootRef = useRef<HTMLDivElement>(null);
@@ -98,9 +121,12 @@ export default function SearchableSelect({
       ref={rootRef}
       className={`${compact ? '' : 'field '}searchable-select${compact ? ' searchable-select--compact' : ''}${open ? ' searchable-select--open' : ''}${disabled ? ' searchable-select--disabled' : ''}`}
     >
-      {!compact && <label htmlFor={listId}>{label}</label>}
-      <div className="searchable-select-control">
-        <Search size={15} strokeWidth={2} className="searchable-select-search-icon" aria-hidden />
+      {!compact && !hideLabel && <label htmlFor={listId}>{label}</label>}
+      <div className={`searchable-select-control${optionMeta && !open && value && optionMeta.has(value) ? ' searchable-select-control--has-dot' : ''}`}>
+        {optionMeta && !open && value && optionMeta.has(value)
+          ? <RefDot storeRef={optionMeta.get(value)!} />
+          : <Search size={15} strokeWidth={2} className="searchable-select-search-icon" aria-hidden />
+        }
         <input
           ref={inputRef}
           id={listId}
@@ -175,6 +201,7 @@ export default function SearchableSelect({
                 onMouseDown={e => e.preventDefault()}
                 onClick={() => select(opt)}
               >
+                {optionMeta?.has(opt) && <RefDot storeRef={optionMeta.get(opt)!} inline />}
                 <span>{opt}</span>
                 {opt === value && <Check size={14} strokeWidth={2.5} aria-hidden />}
               </li>

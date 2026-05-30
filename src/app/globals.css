@@ -771,7 +771,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   gap: 12px;
 }
 
-.home-row-2 { grid-template-columns: 1fr 1fr; }
+.home-row-2 { grid-template-columns: 1fr 1fr; align-items: end; }
 .home-row-3 { grid-template-columns: 1fr 1fr 1fr; }
 .home-row-4 { grid-template-columns: 1fr 1fr 1fr 1fr; }
 
@@ -1480,6 +1480,26 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   color: #bbb;
   pointer-events: none;
   z-index: 1;
+}
+
+.searchable-select-ref-dot {
+  position: absolute;
+  left: 13px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 1;
+  flex-shrink: 0;
+}
+
+.searchable-select-ref-dot--inline {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  pointer-events: none;
 }
 
 .searchable-select-control input {
@@ -3961,6 +3981,123 @@ body.barcode-print-modal-open .searchable-select-search-icon {
   textarea {
     font-size: 16px;
   }
+}
+
+/* ============================================================
+   Store Ref Selector (Settings — Category)
+   ============================================================ */
+/* Category filter buttons on main page */
+.home-cat-field-wrap {
+  position: relative;
+}
+
+.home-cat-field-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+/* ให้ label ตรงกับ .field label ของ SearchableSelect */
+.home-cat-field-header > label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #555;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.home-cat-filter-btns {
+  display: flex;
+  gap: 4px;
+}
+
+.home-cat-filter-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border: 1.5px solid #e0e0e0;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 500;
+  color: #888;
+  background: #fff;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+  white-space: nowrap;
+}
+.home-cat-filter-btn:hover {
+  border-color: #ccc;
+  color: #555;
+}
+.home-cat-filter-btn--active {
+  font-weight: 600;
+}
+
+.settings-ref-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 10px 0 4px;
+}
+
+.settings-ref-filter-count {
+  margin-left: auto;
+  font-size: 12px;
+  color: #aaa;
+  font-weight: 500;
+}
+
+.settings-ref-selector {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.settings-ref-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border: 1.5px solid #e0e0e0;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #666;
+  background: #fff;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+.settings-ref-btn:hover {
+  border-color: #bbb;
+  color: #333;
+}
+.settings-ref-btn--active {
+  font-weight: 600;
+}
+
+/* Inline select inside chip for changing ref */
+.settings-chip-ref-select {
+  border: none;
+  background: transparent;
+  font-size: 11px;
+  color: inherit;
+  cursor: pointer;
+  padding: 0 2px;
+  outline: none;
+  opacity: 0;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+}
+.settings-chip {
+  position: relative;
+}
+.settings-chip:hover .settings-chip-ref-select {
+  opacity: 1;
 }
 
 /* ============================================================

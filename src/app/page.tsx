@@ -39,7 +39,7 @@ import {
   storage,
   QueueItem,
 } from '@/lib/storage';
-import { fetchOptions } from '@/lib/supabase';
+import { fetchOptions, fetchCategoryOptions } from '@/lib/supabase';
 import {
   handleBarcodeInputChange,
   handleBarcodeInputKeyDown,
@@ -66,6 +66,7 @@ function ProductMetaFields({
   onPriceType,
   onBasePrice,
   layout = 'simple',
+  categoryRefMap,
 }: {
   categories: string[];
   productTypes: string[];
@@ -82,18 +83,55 @@ function ProductMetaFields({
   onPriceType: (v: string) => void;
   onBasePrice: (v: string) => void;
   layout?: 'simple' | 'advanced';
+  categoryRefMap?: Map<string, number>;
 }) {
-  const categoryPrepend = categories.includes('อื่นๆ') ? [] : ['อื่นๆ'];
+  const [catFilter, setCatFilter] = useState<number>(0);
+
+  const STORE_COLORS: Record<number, string> = { 0: '#9ca3af', 1: '#3b82f6', 2: '#f97316' };
+  const STORE_LABELS: Record<number, string> = { 0: 'ทั้งหมด', 1: 'ร้าน 1', 2: 'ร้าน 2' };
+
+  const filteredCategories = useMemo(() => {
+    if (catFilter === 0 || !categoryRefMap) return categories;
+    return categories.filter(c => {
+      const r = categoryRefMap.get(c) ?? 0;
+      return r === 0 || r === catFilter;
+    });
+  }, [categories, catFilter, categoryRefMap]);
+
+  const categoryPrepend = filteredCategories.includes('อื่นๆ') ? [] : ['อื่นๆ'];
 
   const categorySelect = (
-    <SearchableSelect
-      label="หมวดหมู่สินค้า"
-      value={category}
-      options={categories}
-      prependOptions={categoryPrepend}
-      onChange={onCategory}
-      placeholder="ค้นหาหมวดหมู่…"
-    />
+    <div className="field searchable-select home-cat-field-wrap">
+      <div className="home-cat-field-header">
+        <label>หมวดหมู่สินค้า</label>
+        {categoryRefMap && categoryRefMap.size > 0 && (
+          <div className="home-cat-filter-btns">
+            {[0, 1, 2].map(r => (
+              <button
+                key={r}
+                type="button"
+                className={`home-cat-filter-btn${catFilter === r ? ' home-cat-filter-btn--active' : ''}`}
+                style={catFilter === r ? { borderColor: STORE_COLORS[r], color: STORE_COLORS[r], background: `${STORE_COLORS[r]}14` } : {}}
+                onClick={() => setCatFilter(r)}
+              >
+                {r !== 0 && <span style={{ width: 7, height: 7, borderRadius: '50%', background: STORE_COLORS[r], display: 'inline-block' }} />}
+                {STORE_LABELS[r]}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      <SearchableSelect
+        label="หมวดหมู่สินค้า"
+        value={category}
+        options={filteredCategories}
+        prependOptions={categoryPrepend}
+        onChange={onCategory}
+        placeholder="ค้นหาหมวดหมู่…"
+        optionMeta={categoryRefMap ?? new Map()}
+        hideLabel
+      />
+    </div>
   );
 
   const typeSelect = (
@@ -175,6 +213,7 @@ export default function Home() {
 
   const [advancedMode, setAdvancedMode] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
+  const [categoryRefMap, setCategoryRefMap] = useState<Map<string, number>>(new Map());
 
   const [barcode, setBarcode] = useState('');
   const [suggestions, setSuggestions] = useState<string[]>([]);
@@ -201,16 +240,18 @@ export default function Home() {
 
   useEffect(() => {
     Promise.all([
-      fetchOptions('category'),
+      fetchCategoryOptions(),
       fetchOptions('product_type'),
       fetchOptions('unit'),
       fetchOptions('price_type'),
     ])
-      .then(([cats, types, unitsList, prices]) => {
+      .then(([catOpts, types, unitsList, prices]) => {
+        const cats = catOpts.map(o => o.value);
         if (cats.length) setCategories(cats);
         if (types.length) setProductTypes(types);
         if (unitsList.length) setUnits(unitsList);
         if (prices.length) setPriceTypes(prices);
+        setCategoryRefMap(new Map(catOpts.map(o => [o.value, o.ref])));
         if (cats.includes('อื่นๆ')) setCategory('อื่นๆ');
         if (types.includes('สินค้าเดี่ยว')) setProductType('สินค้าเดี่ยว');
         if (unitsList.includes('ชิ้น')) setUnit('ชิ้น');
@@ -677,6 +718,7 @@ export default function Home() {
                   onPriceType={setPriceType}
                   onBasePrice={setBasePrice}
                   layout={advancedMode ? 'advanced' : 'simple'}
+                  categoryRefMap={categoryRefMap}
                 />
 
                 <button
