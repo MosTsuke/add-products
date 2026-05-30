@@ -281,18 +281,18 @@ export default function QueueTableView({
           <SearchableSelect
             compact
             label={aria}
-            value={item[field]}
+            value={String(item[field] ?? '')}
             options={options}
             prependOptions={prepend}
             onChange={v => updateField(item.id, field, v)}
             placeholder="เลือก…"
-            inputTitle={cellHoverTitle(item[field])}
+            inputTitle={cellHoverTitle(String(item[field] ?? ''))}
           />
         </td>
       );
     }
 
-    const value = item[field];
+    const value = String(item[field] ?? '');
 
     if (isNameTH) {
       return (
