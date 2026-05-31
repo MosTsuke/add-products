@@ -5433,7 +5433,8 @@ body.barcode-print-modal-open .searchable-select-search-icon {
 /* ── Carousel / Slide mode ───────────────────────────────── */
 .fridge-carousel {
   width: 100%;
-  touch-action: pan-x;
+  /* pan-x อย่างเดียวจะเลื่อนหน้าลงไม่ได้ — ปัดเปลี่ยนประตูยังใช้ touch ใน JS */
+  touch-action: pan-y;
 }
 
 .fridge-carousel-header {
