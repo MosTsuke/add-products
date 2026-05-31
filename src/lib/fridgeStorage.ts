@@ -131,6 +131,12 @@ export function saveFridgeLayout(layout: FridgeLayout) {
   lsSet(KEY_LAYOUT, layout);
 }
 
+/** ใช้หลังโหลดจาก DB — เขียนลง localStorage ของเครื่องนี้ */
+export function applyFridgeSnapshot(config: FridgeConfig, layout: FridgeLayout) {
+  saveFridgeConfig(config);
+  saveFridgeLayout(layout);
+}
+
 export function slotKey(doorId: string, shelfId: string, slotIndex: number): string {
   return `${doorId}__${shelfId}__${slotIndex}`;
 }

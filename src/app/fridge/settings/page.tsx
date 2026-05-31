@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import Navbar from '@/components/Navbar';
 import ConfirmDialog from '@/components/ConfirmDialog';
+import FridgeStorePanel from '@/components/FridgeStorePanel';
 import { SHAPES, FridgeShapeIcon, nameColor, SlotShape } from '@/components/FridgeShapeIcon';
 import {
   getFridgeConfig, saveFridgeConfig, getFridgeLayout, saveFridgeLayout,
@@ -362,6 +363,16 @@ export default function FridgeSettings() {
               <ArrowLeft size={15} /> กลับหน้าตู้เย็น
             </Link>
           </header>
+
+          <FridgeStorePanel
+            config={config}
+            layout={layout}
+            onApply={(c, l) => {
+              saveConfig(c);
+              saveLayout(l);
+            }}
+            onToast={showToast}
+          />
 
           {/* toolbar */}
           <div className="fridge-settings-toolbar">
