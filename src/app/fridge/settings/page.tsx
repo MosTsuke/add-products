@@ -1,15 +1,19 @@
 'use client';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, DragEvent } from 'react';
+import Link from 'next/link';
 import {
-  ChevronDown, ChevronUp, Download, GripVertical,
+  ArrowLeft, Download, GripVertical,
   Plus, Save, Trash2, Upload, X, RefrigeratorIcon,
 } from 'lucide-react';
 import Navbar from '@/components/Navbar';
+import ConfirmDialog from '@/components/ConfirmDialog';
+import { SHAPES, FridgeShapeIcon, nameColor, SlotShape } from '@/components/FridgeShapeIcon';
 import {
   getFridgeConfig, saveFridgeConfig, getFridgeLayout, saveFridgeLayout,
   FridgeConfig, FridgeDoor, FridgeShelf, defaultFridgeConfig,
 } from '@/lib/fridgeStorage';
 import { exportFridgeLayout, exportFridgeConfig, importFridgeLayout } from '@/lib/fridgeExcel';
+import { useBodyScrollLock } from '@/lib/useBodyScrollLock';
 import { fetchOptions } from '@/lib/supabase';
 
 function uid() { return Math.random().toString(36).slice(2, 8); }
@@ -22,19 +26,23 @@ function SlotAssignModal({
   onClear,
   onClose,
 }: {
-  current: { name: string; barcode?: string; category?: string } | null;
+  current: { name: string; barcode?: string; category?: string; shape?: SlotShape; quantity?: number } | null;
   products: { name: string; category: string }[];
-  onSave: (name: string, category: string) => void;
+  onSave: (name: string, category: string, shape: SlotShape | undefined, quantity: number | undefined) => void;
   onClear: () => void;
   onClose: () => void;
 }) {
   const [name, setName] = useState(current?.name ?? '');
   const [cat, setCat] = useState(current?.category ?? '');
+  const [shape, setShape] = useState<SlotShape | undefined>(current?.shape);
+  const [quantity, setQuantity] = useState<string>(current?.quantity ? String(current.quantity) : '');
   const [query, setQuery] = useState('');
 
   const filtered = query.trim()
     ? products.filter(p => p.name.toLowerCase().includes(query.toLowerCase()) || p.category.toLowerCase().includes(query.toLowerCase()))
     : products;
+
+  const previewColor = name ? nameColor(name) : '#a0aec0';
 
   return (
     <div className="fridge-modal-backdrop" onClick={onClose}>
@@ -52,6 +60,38 @@ function SlotAssignModal({
           <div className="field">
             <label>หมวดหมู่</label>
             <input type="text" value={cat} onChange={e => setCat(e.target.value)} placeholder="เช่น เครื่องดื่ม" />
+          </div>
+          <div className="field">
+            <label>จำนวนเต็มช่อง (par)</label>
+            <input
+              type="number"
+              min={1}
+              max={999}
+              value={quantity}
+              onChange={e => setQuantity(e.target.value)}
+              placeholder="เช่น 10"
+            />
+          </div>
+
+          {/* Shape picker */}
+          <div className="field">
+            <label>รูปแบบ</label>
+            <div className="fridge-shape-picker">
+              {SHAPES.map(s => (
+                <button
+                  key={s.id}
+                  type="button"
+                  className={`fridge-shape-btn${shape === s.id ? ' fridge-shape-btn--active' : ''}`}
+                  onClick={() => setShape(shape === s.id ? undefined : s.id)}
+                  title={s.label}
+                >
+                  <div className="fridge-shape-btn-icon">
+                    <s.Icon color={shape === s.id ? previewColor : '#c0c0c0'} />
+                  </div>
+                  <span>{s.label}</span>
+                </button>
+              ))}
+            </div>
           </div>
 
           {products.length > 0 && (
@@ -84,7 +124,7 @@ function SlotAssignModal({
             </button>
           )}
           <button type="button" className="home-btn home-btn--ghost" onClick={onClose}>ยกเลิก</button>
-          <button type="button" className="home-btn home-btn--primary" onClick={() => onSave(name.trim(), cat.trim())} disabled={!name.trim()}>
+          <button type="button" className="home-btn home-btn--primary" onClick={() => onSave(name.trim(), cat.trim(), shape, quantity ? parseInt(quantity) : undefined)} disabled={!name.trim()}>
             <Save size={15} /> บันทึก
           </button>
         </div>
@@ -99,8 +139,18 @@ export default function FridgeSettings() {
   const [layout, setLayout] = useState<ReturnType<typeof getFridgeLayout>>({});
   const [products, setProducts] = useState<{ name: string; category: string }[]>([]);
   const [toast, setToast] = useState('');
+  const [confirmReset, setConfirmReset] = useState(false);
+  const [confirmRemoveDoorId, setConfirmRemoveDoorId] = useState<string | null>(null);
   const [assignTarget, setAssignTarget] = useState<{ doorId: string; shelfId: string; slotIndex: number } | null>(null);
   const importRef = useRef<HTMLInputElement>(null);
+
+  // Drag state
+  const dragDoor = useRef<number | null>(null);
+  const dragShelf = useRef<{ doorId: string; idx: number } | null>(null);
+  const dragSlot = useRef<string | null>(null);
+  const [dragOverDoor, setDragOverDoor] = useState<number | null>(null);
+  const [dragOverShelf, setDragOverShelf] = useState<{ doorId: string; idx: number } | null>(null);
+  const [dragOverSlot, setDragOverSlot] = useState<string | null>(null);
 
   useEffect(() => {
     setConfig(getFridgeConfig());
@@ -116,6 +166,8 @@ export default function FridgeSettings() {
 
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(''), 3000); };
 
+  useBodyScrollLock(!!assignTarget);
+
   const saveConfig = (next: FridgeConfig) => { setConfig(next); saveFridgeConfig(next); };
   const saveLayout = (next: ReturnType<typeof getFridgeLayout>) => { setLayout(next); saveFridgeLayout(next); };
 
@@ -129,6 +181,11 @@ export default function FridgeSettings() {
   };
   const removeDoor = (doorId: string) => {
     saveConfig({ doors: config.doors.filter(d => d.id !== doorId) });
+    const next = { ...layout };
+    for (const key of Object.keys(next)) {
+      if (key.startsWith(`${doorId}__`)) delete next[key];
+    }
+    saveLayout(next);
   };
   const moveDoor = (idx: number, dir: -1 | 1) => {
     const arr = [...config.doors];
@@ -159,10 +216,16 @@ export default function FridgeSettings() {
     return layout[`${doorId}__${shelfId}__${slotIndex}`] ?? null;
   };
 
-  const handleSaveSlot = (name: string, category: string) => {
+  const handleSaveSlot = (name: string, category: string, shape: import('@/components/FridgeShapeIcon').SlotShape | undefined, quantity: number | undefined) => {
     if (!assignTarget) return;
     const { doorId, shelfId, slotIndex } = assignTarget;
-    const next = { ...layout, [`${doorId}__${shelfId}__${slotIndex}`]: name ? { name, category } : null };
+    const item = name ? {
+      name,
+      category,
+      ...(shape ? { shape } : {}),
+      ...(quantity ? { quantity } : {}),
+    } : null;
+    const next = { ...layout, [`${doorId}__${shelfId}__${slotIndex}`]: item };
     saveLayout(next);
     setAssignTarget(null);
   };
@@ -175,6 +238,88 @@ export default function FridgeSettings() {
     saveLayout(next);
     setAssignTarget(null);
   };
+
+  // Drag handlers — doors
+  const onDoorDragStart = (e: DragEvent, idx: number) => {
+    dragDoor.current = idx;
+    e.dataTransfer.effectAllowed = 'move';
+  };
+  const onDoorDragOver = (e: DragEvent, idx: number) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    setDragOverDoor(idx);
+  };
+  const onDoorDrop = (e: DragEvent, idx: number) => {
+    e.preventDefault();
+    const from = dragDoor.current;
+    if (from === null || from === idx) { setDragOverDoor(null); return; }
+    const arr = [...config.doors];
+    const [item] = arr.splice(from, 1);
+    arr.splice(idx, 0, item);
+    saveConfig({ doors: arr });
+    dragDoor.current = null;
+    setDragOverDoor(null);
+  };
+  const onDoorDragEnd = () => { dragDoor.current = null; setDragOverDoor(null); };
+
+  // Drag handlers — shelves
+  const onShelfDragStart = (e: DragEvent, doorId: string, idx: number) => {
+    dragShelf.current = { doorId, idx };
+    e.dataTransfer.effectAllowed = 'move';
+    e.stopPropagation();
+  };
+  const onShelfDragOver = (e: DragEvent, doorId: string, idx: number) => {
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'move';
+    setDragOverShelf({ doorId, idx });
+  };
+  const onShelfDrop = (e: DragEvent, doorId: string, idx: number) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const from = dragShelf.current;
+    if (!from || from.doorId !== doorId || from.idx === idx) { setDragOverShelf(null); return; }
+    const door = config.doors.find(d => d.id === doorId)!;
+    const shelves = [...door.shelves];
+    const [item] = shelves.splice(from.idx, 1);
+    shelves.splice(idx, 0, item);
+    saveConfig({ doors: config.doors.map(d => d.id === doorId ? { ...d, shelves } : d) });
+    dragShelf.current = null;
+    setDragOverShelf(null);
+  };
+  const onShelfDragEnd = () => { dragShelf.current = null; setDragOverShelf(null); }
+
+  // Drag handlers — slots
+  const onSlotDragStart = (e: DragEvent, key: string) => {
+    dragSlot.current = key;
+    e.dataTransfer.effectAllowed = 'move';
+    e.stopPropagation();
+  };
+  const onSlotDragOver = (e: DragEvent, key: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (dragSlot.current && dragSlot.current !== key) {
+      e.dataTransfer.dropEffect = 'move';
+      setDragOverSlot(key);
+    }
+  };
+  const onSlotDrop = (e: DragEvent, key: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const from = dragSlot.current;
+    if (!from || from === key) { setDragOverSlot(null); return; }
+    const next = { ...layout };
+    const tmp = next[from] ?? null;
+    next[from] = next[key] ?? null;
+    next[key] = tmp;
+    // clean up null entries
+    if (!next[from]) delete next[from];
+    if (!next[key]) delete next[key];
+    saveLayout(next);
+    dragSlot.current = null;
+    setDragOverSlot(null);
+  };
+  const onSlotDragEnd = () => { dragSlot.current = null; setDragOverSlot(null); };;
 
   // Export / Import
   const handleExportLayout = () => {
@@ -198,6 +343,10 @@ export default function FridgeSettings() {
     e.target.value = '';
   };
 
+  const doorPendingRemoval = confirmRemoveDoorId
+    ? config.doors.find(d => d.id === confirmRemoveDoorId)
+    : null;
+
   return (
     <>
       <Navbar />
@@ -209,6 +358,9 @@ export default function FridgeSettings() {
               <h1>ตั้งค่าตู้เย็น</h1>
               <p>กำหนดประตู ชั้น และจำนวน Slot — กด Slot เพื่อ assign สินค้า</p>
             </div>
+            <Link href="/fridge" className="home-btn home-btn--ghost">
+              <ArrowLeft size={15} /> กลับหน้าตู้เย็น
+            </Link>
           </header>
 
           {/* toolbar */}
@@ -216,7 +368,7 @@ export default function FridgeSettings() {
             <button type="button" className="home-btn home-btn--ghost" onClick={addDoor}>
               <Plus size={15} /> เพิ่มประตู
             </button>
-            <button type="button" className="home-btn home-btn--ghost" onClick={() => { saveConfig(defaultFridgeConfig()); showToast('รีเซ็ตเป็นค่าเริ่มต้นแล้ว'); }}>
+            <button type="button" className="home-btn home-btn--ghost" onClick={() => setConfirmReset(true)}>
               <RefrigeratorIcon size={15} /> รีเซ็ต
             </button>
             <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
@@ -236,27 +388,42 @@ export default function FridgeSettings() {
           {/* doors */}
           <div className="fridge-settings-doors">
             {config.doors.map((door, di) => (
-              <div key={door.id} className="fridge-settings-door home-card">
+              <div
+                key={door.id}
+                className={`fridge-settings-door${dragOverDoor === di ? ' fridge-drag-over' : ''}`}
+                draggable
+                onDragStart={e => onDoorDragStart(e, di)}
+                onDragOver={e => onDoorDragOver(e, di)}
+                onDrop={e => onDoorDrop(e, di)}
+                onDragEnd={onDoorDragEnd}
+              >
                 {/* door header */}
                 <div className="fridge-settings-door-header">
-                  <GripVertical size={16} color="#ccc" />
+                  <GripVertical size={16} color="#ccc" style={{ cursor: 'grab', flexShrink: 0 }} />
                   <input
                     className="fridge-settings-door-name"
                     value={door.name}
                     onChange={e => updateDoor(door.id, e.target.value)}
                   />
                   <div style={{ display: 'flex', gap: 4, marginLeft: 'auto' }}>
-                    <button type="button" className="fridge-icon-btn" onClick={() => moveDoor(di, -1)} disabled={di === 0} title="ขยับขึ้น"><ChevronUp size={15} /></button>
-                    <button type="button" className="fridge-icon-btn" onClick={() => moveDoor(di, 1)} disabled={di === config.doors.length - 1} title="ขยับลง"><ChevronDown size={15} /></button>
-                    <button type="button" className="fridge-icon-btn fridge-icon-btn--danger" onClick={() => removeDoor(door.id)} title="ลบประตู"><Trash2 size={15} /></button>
+                    <button type="button" className="fridge-icon-btn fridge-icon-btn--danger" onClick={() => setConfirmRemoveDoorId(door.id)} title="ลบประตู"><Trash2 size={15} /></button>
                   </div>
                 </div>
 
                 {/* shelves */}
                 <div className="fridge-settings-shelves">
-                  {door.shelves.map(shelf => (
-                    <div key={shelf.id} className="fridge-settings-shelf">
+                  {door.shelves.map((shelf, si) => (
+                    <div
+                      key={shelf.id}
+                      className={`fridge-settings-shelf${dragOverShelf?.doorId === door.id && dragOverShelf?.idx === si ? ' fridge-drag-over' : ''}`}
+                      draggable
+                      onDragStart={e => onShelfDragStart(e, door.id, si)}
+                      onDragOver={e => onShelfDragOver(e, door.id, si)}
+                      onDrop={e => onShelfDrop(e, door.id, si)}
+                      onDragEnd={onShelfDragEnd}
+                    >
                       <div className="fridge-settings-shelf-header">
+                        <GripVertical size={14} color="#ccc" style={{ cursor: 'grab', flexShrink: 0 }} />
                         <input
                           className="fridge-settings-shelf-name"
                           value={shelf.name}
@@ -281,16 +448,26 @@ export default function FridgeSettings() {
                         {Array.from({ length: shelf.slots }).map((_, si) => {
                           const key = `${door.id}__${shelf.id}__${si}`;
                           const item = layout[key];
+                          const isOver = dragOverSlot === key;
+                          const isDragging = dragSlot.current === key;
                           return (
                             <button
                               key={si}
                               type="button"
-                              className={`fridge-slot${item ? ' fridge-slot--filled' : ''}`}
+                              draggable={!!item}
+                              className={`fridge-slot${item ? ' fridge-slot--filled' : ''}${isOver ? ' fridge-slot--drop-target' : ''}${isDragging ? ' fridge-slot--dragging' : ''}`}
                               onClick={() => setAssignTarget({ doorId: door.id, shelfId: shelf.id, slotIndex: si })}
+                              onDragStart={item ? e => onSlotDragStart(e, key) : undefined}
+                              onDragOver={e => onSlotDragOver(e, key)}
+                              onDrop={e => onSlotDrop(e, key)}
+                              onDragEnd={onSlotDragEnd}
                               title={item?.name ?? 'ว่าง'}
                             >
                               {item ? (
-                                <span className="fridge-slot-name">{item.name}</span>
+                                <>
+                                  {item.quantity && <span className="fridge-slot-qty">{item.quantity}</span>}
+                                  <span className="fridge-slot-name">{item.name}</span>
+                                </>
                               ) : (
                                 <Plus size={12} color="#ccc" />
                               )}
@@ -320,6 +497,30 @@ export default function FridgeSettings() {
           </div>
         </div>
       </div>
+
+      {confirmReset && (
+        <ConfirmDialog
+          message="รีเซ็ตกลับเป็นค่าเริ่มต้น (3 ประตู)? การตั้งค่าและ layout ปัจจุบันจะหายทั้งหมด"
+          confirmLabel="รีเซ็ตเลย"
+          danger
+          onConfirm={() => { saveConfig(defaultFridgeConfig()); showToast('รีเซ็ตเป็นค่าเริ่มต้นแล้ว'); setConfirmReset(false); }}
+          onCancel={() => setConfirmReset(false)}
+        />
+      )}
+
+      {doorPendingRemoval && confirmRemoveDoorId && (
+        <ConfirmDialog
+          message={`ลบ "${doorPendingRemoval.name}"? ชั้นและสินค้าในประตูนี้จะถูกลบทั้งหมด`}
+          confirmLabel="ลบประตู"
+          danger
+          onConfirm={() => {
+            removeDoor(confirmRemoveDoorId);
+            setConfirmRemoveDoorId(null);
+            showToast(`ลบ ${doorPendingRemoval.name} แล้ว`);
+          }}
+          onCancel={() => setConfirmRemoveDoorId(null)}
+        />
+      )}
 
       {assignTarget && (
         <SlotAssignModal

@@ -8,6 +8,8 @@ export interface FridgeSlotItem {
   name: string;
   barcode?: string;
   category?: string;
+  shape?: import('@/components/FridgeShapeIcon').SlotShape;
+  quantity?: number; // par level (full stock)
 }
 
 export interface FridgeShelf {
@@ -38,6 +40,8 @@ export interface RestockItem {
   slotIndex: number;
   productName: string;
   count: number;
+  /** เช็คแล้วว่าเติมเสร็จ */
+  checked?: boolean;
 }
 
 // ============================================================
