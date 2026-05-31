@@ -20,8 +20,8 @@ export default function ConfirmDialog({
   useBodyScrollLock(true);
 
   return (
-    <div className="confirm-backdrop" onClick={onCancel}>
-      <div className="confirm-dialog" onClick={e => e.stopPropagation()}>
+    <div className="confirm-backdrop">
+      <div className="confirm-dialog">
         <p className="confirm-message">{message}</p>
         <div className="confirm-actions">
           <button type="button" className="home-btn home-btn--ghost" onClick={onCancel}>

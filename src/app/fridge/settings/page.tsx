@@ -46,8 +46,8 @@ function SlotAssignModal({
   const previewColor = name ? nameColor(name) : '#a0aec0';
 
   return (
-    <div className="fridge-modal-backdrop" onClick={onClose}>
-      <div className="fridge-modal" onClick={e => e.stopPropagation()}>
+    <div className="fridge-modal-backdrop">
+      <div className="fridge-modal">
         <div className="fridge-modal-header">
           <h3>กำหนดสินค้าในช่อง</h3>
           <button className="fridge-modal-close" onClick={onClose}><X size={18} /></button>

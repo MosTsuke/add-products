@@ -4314,6 +4314,7 @@ body.barcode-print-modal-open .searchable-select-search-icon {
 
 .fridge-door-body {
   background: #f8f9ff;
+  touch-action: pan-y;
 }
 
 .fridge-door-shelves {
@@ -4360,7 +4361,7 @@ body.barcode-print-modal-open .searchable-select-search-icon {
   background: rgba(255,255,255,0.8);
   cursor: pointer;
   padding: 5px 4px;
-  touch-action: none;
+  touch-action: manipulation;
   -webkit-user-select: none;
   user-select: none;
   transition: border-color 0.15s, background 0.15s, box-shadow 0.15s, transform 0.1s;
@@ -4669,8 +4670,8 @@ body.barcode-print-modal-open .searchable-select-search-icon {
 /* ── Visual mode ────────────────────────────────── */
 .fridge-shelf-slots--visual { gap: 6px; }
 .fridge-slot--visual {
-  min-height: 100px;
-  padding: 6px 4px 5px;
+  min-height: 84px;
+  padding: 5px 4px 4px;
   flex-direction: column;
   align-items: center;
   justify-content: flex-start;
@@ -4689,8 +4690,8 @@ body.barcode-print-modal-open .searchable-select-search-icon {
   padding: 1px 6px;
 }
 .fridge-slot-icon {
-  width: 48px;
-  height: 58px;
+  width: 34px;
+  height: 42px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -4700,7 +4701,7 @@ body.barcode-print-modal-open .searchable-select-search-icon {
   pointer-events: none;
 }
 .fridge-slot--visual:hover:not(:disabled) .fridge-slot-icon {
-  transform: translateY(-4px) scale(1.1);
+  transform: translateY(-2px) scale(1.06);
 }
 .fridge-slot-icon svg { width: 100%; height: 100%; }
 .fridge-slot-name--visual {
@@ -5432,6 +5433,7 @@ body.barcode-print-modal-open .searchable-select-search-icon {
 /* ── Carousel / Slide mode ───────────────────────────────── */
 .fridge-carousel {
   width: 100%;
+  touch-action: pan-x;
 }
 
 .fridge-carousel-header {

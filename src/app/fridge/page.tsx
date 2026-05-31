@@ -18,6 +18,8 @@ type LayoutMode = 'scroll' | 'slide';
 
 /** กดค้างเปิดกรอกจำนวน — สั้นพอแยกจากกดครั้งเดียว (+1) */
 const LONG_PRESS_MS = 1000;
+/** เลื่อนนิ้วเกินนี้ถือว่า scroll/slide ไม่นับเป็นกด +1 */
+const TAP_MOVE_THRESHOLD = 12;
 
 function stockLevelClass(pct: number | null, block: 'fridge-slot' | 'fridge-restock-item'): string {
   if (pct == null) return '';
@@ -36,6 +38,7 @@ export default function FridgePage() {
   const [activeDoor, setActiveDoor] = useState(0);
   const [confirmClear, setConfirmClear] = useState(false);
   const swipeRef = useRef<{ startX: number; startY: number } | null>(null);
+  const blockTapUntilRef = useRef(0);
   const [qtyModal, setQtyModal] = useState<{
     slotKey: string;
     doorId: string;
@@ -50,9 +53,18 @@ export default function FridgePage() {
 
   const qtyInputRef = useRef<HTMLInputElement>(null);
   const [holdingSlotKey, setHoldingSlotKey] = useState<string | null>(null);
-  const slotPressRef = useRef<{ timer: ReturnType<typeof setTimeout> | null; longPress: boolean }>({
+  const slotPressRef = useRef<{
+    timer: ReturnType<typeof setTimeout> | null;
+    longPress: boolean;
+    startX: number;
+    startY: number;
+    moved: boolean;
+  }>({
     timer: null,
     longPress: false,
+    startX: 0,
+    startY: 0,
+    moved: false,
   });
 
   useEffect(() => {
@@ -101,6 +113,7 @@ export default function FridgePage() {
     const dy = e.changedTouches[0].clientY - swipeRef.current.startY;
     swipeRef.current = null;
     if (Math.abs(dx) < 40 || Math.abs(dx) < Math.abs(dy)) return;
+    blockTapUntilRef.current = Date.now() + 400;
     if (dx < 0) nextDoor(total);
     else prevDoor();
   };
@@ -119,6 +132,18 @@ export default function FridgePage() {
   const clearSlotPress = () => {
     if (slotPressRef.current.timer) clearTimeout(slotPressRef.current.timer);
     slotPressRef.current.timer = null;
+  };
+
+  const markSlotPointerMoved = (clientX: number, clientY: number) => {
+    const dx = clientX - slotPressRef.current.startX;
+    const dy = clientY - slotPressRef.current.startY;
+    if (Math.hypot(dx, dy) <= TAP_MOVE_THRESHOLD) return false;
+    if (!slotPressRef.current.moved) {
+      slotPressRef.current.moved = true;
+      clearSlotPress();
+      setHoldingSlotKey(null);
+    }
+    return true;
   };
 
   const addOneToRestock = (
@@ -212,19 +237,25 @@ export default function FridgePage() {
     const key = `${doorId}__${shelfId}__${slotIndex}`;
     if (!layout[key]) return;
 
-    e.preventDefault();
-    e.currentTarget.setPointerCapture(e.pointerId);
-
     endSlotPress();
     slotPressRef.current.longPress = false;
+    slotPressRef.current.moved = false;
+    slotPressRef.current.startX = e.clientX;
+    slotPressRef.current.startY = e.clientY;
     setHoldingSlotKey(key);
 
     slotPressRef.current.timer = setTimeout(() => {
+      if (slotPressRef.current.moved) return;
       slotPressRef.current.longPress = true;
       setHoldingSlotKey(null);
       if (typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate(40);
       openQtyModal(doorId, doorName, shelfId, shelfName, slotIndex);
     }, LONG_PRESS_MS);
+  };
+
+  const handleSlotPointerMove = (e: React.PointerEvent<HTMLButtonElement>) => {
+    if (e.buttons === 0) return;
+    markSlotPointerMoved(e.clientX, e.clientY);
   };
 
   const handleSlotPointerUp = (
@@ -235,21 +266,21 @@ export default function FridgePage() {
     shelfName: string,
     slotIndex: number
   ) => {
-    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
-      e.currentTarget.releasePointerCapture(e.pointerId);
-    }
-
     const wasLong = slotPressRef.current.longPress;
+    const wasMoved = slotPressRef.current.moved;
     endSlotPress();
-    if (!wasLong) addOneToRestock(doorId, doorName, shelfId, shelfName, slotIndex);
+    setHoldingSlotKey(null);
+
+    if (Date.now() < blockTapUntilRef.current) return;
+    if (wasMoved || wasLong) return;
+    addOneToRestock(doorId, doorName, shelfId, shelfName, slotIndex);
   };
 
-  const handleSlotPointerCancel = (e: React.PointerEvent<HTMLButtonElement>) => {
-    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
-      e.currentTarget.releasePointerCapture(e.pointerId);
-    }
+  const handleSlotPointerCancel = () => {
     endSlotPress();
     slotPressRef.current.longPress = false;
+    slotPressRef.current.moved = true;
+    setHoldingSlotKey(null);
   };
 
   const adjustCount = (slotKey: string, delta: number) => {
@@ -304,8 +335,12 @@ export default function FridgePage() {
                       className={`fridge-slot ${item ? 'fridge-slot--filled' : 'fridge-slot--empty'}${restockItem ? ' fridge-slot--queued' : ''}${viewMode === 'visual' ? ' fridge-slot--visual' : ''}${holdingSlotKey === key ? ' fridge-slot--holding' : ''}${stockClass}`}
                       disabled={!item}
                       onPointerDown={e => handleSlotPointerDown(e, door.id, door.name, shelf.id, shelf.name, si)}
+                      onPointerMove={handleSlotPointerMove}
                       onPointerUp={e => handleSlotPointerUp(e, door.id, door.name, shelf.id, shelf.name, si)}
                       onPointerCancel={handleSlotPointerCancel}
+                      onPointerLeave={e => {
+                        if (e.buttons !== 0) markSlotPointerMoved(e.clientX, e.clientY);
+                      }}
                       onContextMenu={e => item && e.preventDefault()}
                       title={
                         item
@@ -484,8 +519,8 @@ export default function FridgePage() {
 
           {/* Qty modal */}
           {qtyModal && (
-            <div className="fridge-modal-backdrop" onClick={() => setQtyModal(null)}>
-              <div className="fridge-modal fridge-qty-modal" onClick={e => e.stopPropagation()} role="dialog" aria-labelledby="fridge-qty-title">
+            <div className="fridge-modal-backdrop">
+              <div className="fridge-modal fridge-qty-modal" role="dialog" aria-labelledby="fridge-qty-title">
                 <div className="fridge-modal-header">
                   <h3 id="fridge-qty-title">เติมสินค้า</h3>
                   <button type="button" className="fridge-modal-close" onClick={() => setQtyModal(null)} aria-label="ปิด">
@@ -549,8 +584,8 @@ export default function FridgePage() {
 
           {/* Restock panel */}
           {showList && (
-            <div className="fridge-restock-overlay" onClick={() => setShowList(false)}>
-              <div className="fridge-restock-panel" onClick={e => e.stopPropagation()}>
+            <div className="fridge-restock-overlay">
+              <div className="fridge-restock-panel">
                 <div className="fridge-restock-panel-header">
                   <h3>
                     รายการเติม{' '}
