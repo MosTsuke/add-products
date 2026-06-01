@@ -104,9 +104,10 @@ function escapeHtml(s: string): string {
 /** HTML สำหรับพิมพ์ / แสดงตัวอย่างใน iframe */
 export function buildBarcodePrintHtml(
   rows: BarcodePrintRow[],
-  title = 'ป้าย Barcode'
+  title = 'ป้าย Barcode',
+  options?: { oneGroupPerPage?: boolean }
 ): string {
-  return buildPrintHtml(rows, title);
+  return buildPrintHtml(rows, title, options);
 }
 
 function renderLabel(row: BarcodePrintRow): string {
@@ -160,7 +161,10 @@ function chunkHeightMm(labelCount: number, withHeader: boolean, withBlockGap: bo
   );
 }
 
-function paginateBarcodeGroups(groups: { category: string; rows: BarcodePrintRow[] }[]): PrintPage[] {
+function paginateBarcodeGroups(
+  groups: { category: string; rows: BarcodePrintRow[] }[],
+  options?: { oneGroupPerPage?: boolean }
+): PrintPage[] {
   const pages: PrintPage[] = [{ chunks: [] }];
   let usedOnPage = 0;
 
@@ -172,6 +176,9 @@ function paginateBarcodeGroups(groups: { category: string; rows: BarcodePrintRow
   const currentPage = () => pages[pages.length - 1];
 
   for (const group of groups) {
+    if (options?.oneGroupPerPage && currentPage().chunks.length > 0) {
+      startNewPage();
+    }
     let remaining = group.rows;
     let isFirstChunkOfCategory = true;
 
@@ -212,9 +219,9 @@ function paginateBarcodeGroups(groups: { category: string; rows: BarcodePrintRow
   return pages.filter(p => p.chunks.length > 0);
 }
 
-export function countBarcodePrintPages(rows: BarcodePrintRow[]): number {
+export function countBarcodePrintPages(rows: BarcodePrintRow[], options?: { oneGroupPerPage?: boolean }): number {
   if (rows.length === 0) return 0;
-  return paginateBarcodeGroups(groupRowsByCategory(rows)).length;
+  return paginateBarcodeGroups(groupRowsByCategory(rows), options).length;
 }
 
 function renderPageChunk(chunk: PageChunk): string {
@@ -228,8 +235,8 @@ function renderPageChunk(chunk: PageChunk): string {
     </section>`;
 }
 
-function buildPrintHtml(rows: BarcodePrintRow[], title: string): string {
-  const pages = paginateBarcodeGroups(groupRowsByCategory(rows));
+function buildPrintHtml(rows: BarcodePrintRow[], title: string, options?: { oneGroupPerPage?: boolean }): string {
+  const pages = paginateBarcodeGroups(groupRowsByCategory(rows), options);
   const totalPages = pages.length;
 
   const pagesHtml = pages
@@ -377,10 +384,11 @@ function buildPrintHtml(rows: BarcodePrintRow[], title: string): string {
 /** เปิดหน้าต่างพิมพ์ (A4) */
 export function openBarcodePrintPreview(
   rows: BarcodePrintRow[],
-  title = 'ป้าย Barcode'
+  title = 'ป้าย Barcode',
+  options?: { oneGroupPerPage?: boolean }
 ): void {
   if (rows.length === 0) return;
-  const html = buildBarcodePrintHtml(rows, title);
+  const html = buildBarcodePrintHtml(rows, title, options);
   const w = window.open('', '_blank', 'noopener,noreferrer');
   if (!w) {
     alert('เบราว์เซอร์บล็อกหน้าต่างใหม่ — อนุญาต popup แล้วลองอีกครั้ง');
@@ -397,10 +405,11 @@ export function openBarcodePrintPreview(
 export function downloadBarcodePrintDoc(
   rows: BarcodePrintRow[],
   filename?: string,
-  title = 'ป้าย Barcode'
+  title = 'ป้าย Barcode',
+  options?: { oneGroupPerPage?: boolean }
 ): void {
   if (rows.length === 0) return;
-  const body = buildBarcodePrintHtml(rows, title);
+  const body = buildBarcodePrintHtml(rows, title, options);
   const wordHtml = `\ufeff${body.replace(
     '<html lang="th">',
     '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" lang="th">'

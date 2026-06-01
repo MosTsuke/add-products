@@ -1,8 +1,16 @@
 'use client';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeft, ChevronRight, FileText, Printer, Sticker, X } from 'lucide-react';
+import { ArrowLeft, ChevronRight, FileText, LayoutGrid, Printer, Sticker, X } from 'lucide-react';
+import BarcodePrintLayoutStep from '@/components/BarcodePrintLayoutStep';
+import ConfirmDialog from '@/components/ConfirmDialog';
 import { isGeneratedRunBarcode } from '@/lib/barcodeGenerate';
+import {
+  createDefaultBarcodePrintLayout,
+  buildBarcodePrintRowsFromLayout,
+  syncBarcodePrintLayout,
+  type BarcodePrintLayout,
+} from '@/lib/barcodePrintLayout';
 import {
   buildBarcodePrintHtml,
   buildBarcodePrintRows,
@@ -14,7 +22,7 @@ import {
 import { QueueItem } from '@/lib/storage';
 
 type ListFilter = 'all' | 'generated' | 'from-file' | 'selected';
-type ModalStep = 'select' | 'preview';
+type ModalStep = 'select' | 'preview' | 'layout';
 type BarcodeSearchField = 'product' | 'category';
 
 interface BarcodePrintModalProps {
@@ -70,6 +78,12 @@ export default function BarcodePrintModal({
   const [searchField, setSearchField] = useState<BarcodeSearchField>('product');
   const [searchValue, setSearchValue] = useState('');
   const [listFilter, setListFilter] = useState<ListFilter>('all');
+  const [printLayout, setPrintLayout] = useState<BarcodePrintLayout | null>(null);
+  const [layoutDraft, setLayoutDraft] = useState<BarcodePrintLayout | null>(null);
+  const [confirmDiscardLayout, setConfirmDiscardLayout] = useState(false);
+  const [confirmCloseLayout, setConfirmCloseLayout] = useState(false);
+  const [oneGroupPerPage, setOneGroupPerPage] = useState(false);
+  const layoutDraftBaseRef = useRef<string>('');
   const previewIframeRef = useRef<HTMLIFrameElement>(null);
   const [portalReady, setPortalReady] = useState(false);
 
@@ -100,6 +114,16 @@ export default function BarcodePrintModal({
     setSelectedIds(new Set(defaultSelectedIds));
   }, [defaultSelectedIds]);
 
+  const selectedIdsKey = useMemo(
+    () => [...selectedIds].sort().join(','),
+    [selectedIds],
+  );
+
+  useEffect(() => {
+    setPrintLayout(null);
+    setLayoutDraft(null);
+  }, [selectedIdsKey]);
+
   useEffect(() => {
     if (step === 'preview' && document.activeElement instanceof HTMLElement) {
       document.activeElement.blur();
@@ -127,19 +151,26 @@ export default function BarcodePrintModal({
     return printable.filter(i => idSet.has(i.id));
   }, [printable, selectedIds]);
 
-  const selectedRows = useMemo(
-    () => buildBarcodePrintRows(selectedItems, 'category', items),
-    [selectedItems, items]
-  );
+  const selectedRows = useMemo(() => {
+    if (printLayout) {
+      return buildBarcodePrintRowsFromLayout(
+        selectedItems,
+        syncBarcodePrintLayout(printLayout, selectedItems.map(i => i.id)),
+      );
+    }
+    return buildBarcodePrintRows(selectedItems, 'category', items);
+  }, [selectedItems, printLayout, items]);
+
+  const usesCustomLayout = printLayout != null;
 
   const pageCount = useMemo(
-    () => countBarcodePrintPages(selectedRows),
-    [selectedRows]
+    () => countBarcodePrintPages(selectedRows, { oneGroupPerPage }),
+    [selectedRows, oneGroupPerPage]
   );
 
   const previewHtml = useMemo(
-    () => (selectedRows.length > 0 ? buildBarcodePrintHtml(selectedRows) : ''),
-    [selectedRows]
+    () => (selectedRows.length > 0 ? buildBarcodePrintHtml(selectedRows, 'ป้าย Barcode', { oneGroupPerPage }) : ''),
+    [selectedRows, oneGroupPerPage]
   );
 
   useEffect(() => {
@@ -147,6 +178,19 @@ export default function BarcodePrintModal({
     const t = window.setTimeout(resizePreviewIframe, 80);
     return () => window.clearTimeout(t);
   }, [step, previewHtml, resizePreviewIframe]);
+
+  const openLayoutStep = () => {
+    const base = printLayout ?? createDefaultBarcodePrintLayout(selectedItems);
+    const synced = syncBarcodePrintLayout(base, selectedItems.map(i => i.id));
+    setLayoutDraft(synced);
+    layoutDraftBaseRef.current = JSON.stringify(synced);
+    setStep('layout');
+  };
+
+  const isLayoutDirty = useMemo(() => {
+    if (!layoutDraft) return false;
+    return JSON.stringify(layoutDraft) !== layoutDraftBaseRef.current;
+  }, [layoutDraft]);
 
   const selectedInView = filtered.filter(i => selectedIds.has(i.id)).length;
   const allFilteredSelected =
@@ -180,12 +224,12 @@ export default function BarcodePrintModal({
 
   const handlePrint = () => {
     if (selectedRows.length === 0) return;
-    openBarcodePrintPreview(selectedRows);
+    openBarcodePrintPreview(selectedRows, 'ป้าย Barcode', { oneGroupPerPage });
   };
 
   const handleDownloadDoc = () => {
     if (selectedRows.length === 0) return;
-    downloadBarcodePrintDoc(selectedRows);
+    downloadBarcodePrintDoc(selectedRows, undefined, 'ป้าย Barcode', { oneGroupPerPage });
   };
 
   const generatedCount = printable.filter(i => isGeneratedRunBarcode(i.barcode)).length;
@@ -194,11 +238,13 @@ export default function BarcodePrintModal({
   const panelClass =
     step === 'preview'
       ? 'barcode-print-modal-panel barcode-print-modal-panel--preview'
-      : 'barcode-print-modal-panel';
+      : step === 'layout'
+        ? 'barcode-print-modal-panel barcode-print-modal-panel--layout'
+        : 'barcode-print-modal-panel';
 
   const modal = (
     <div className="barcode-print-modal" role="dialog" aria-labelledby="barcode-print-modal-title">
-      <div className="barcode-print-modal-backdrop" onClick={onClose} aria-hidden />
+      <div className="barcode-print-modal-backdrop" aria-hidden />
       <div className={panelClass} onClick={e => e.stopPropagation()}>
         <header className="barcode-print-modal-header">
           <div className="barcode-print-modal-title">
@@ -208,21 +254,84 @@ export default function BarcodePrintModal({
               <p className="barcode-print-modal-steps" aria-label="ขั้นตอน">
                 <span className={step === 'select' ? 'is-active' : ''}>1. เลือกรายการ</span>
                 <ChevronRight size={14} strokeWidth={2} aria-hidden />
-                <span className={step === 'preview' ? 'is-active' : ''}>2. ตัวอย่าง A4</span>
+                <span className={step === 'preview' || step === 'layout' ? 'is-active' : ''}>
+                  2. ตัวอย่าง A4
+                  {usesCustomLayout && step !== 'select' ? ' · จัดตำแหน่งแล้ว' : ''}
+                </span>
               </p>
             </div>
           </div>
           <button
             type="button"
             className="queue-table-view-close"
-            onClick={onClose}
+            onClick={() => {
+              if (step === 'layout') {
+                // หน้านี้มี draft ที่ยังไม่ได้ apply — เตือนก่อนปิดเสมอ
+                setConfirmCloseLayout(true);
+                return;
+              }
+              onClose();
+            }}
             aria-label="ปิด"
           >
             <X size={20} strokeWidth={2} />
           </button>
         </header>
 
-        {step === 'select' ? (
+        {step === 'layout' && layoutDraft ? (
+          <>
+            <BarcodePrintLayoutStep
+              items={selectedItems}
+              layout={layoutDraft}
+              onLayoutChange={setLayoutDraft}
+              onBack={() => {
+                if (!isLayoutDirty) {
+                  setLayoutDraft(null);
+                  setStep('preview');
+                  return;
+                }
+                setConfirmDiscardLayout(true);
+              }}
+              onApply={() => {
+                setPrintLayout(layoutDraft);
+                setLayoutDraft(null);
+                setConfirmDiscardLayout(false);
+                setStep('preview');
+              }}
+            />
+            {confirmDiscardLayout && (
+              <ConfirmDialog
+                message="กลับไปตัวอย่าง A4 โดยไม่บันทึกการจัดตำแหน่งที่แก้ไขไว้?"
+                confirmLabel="กลับโดยไม่บันทึก"
+                cancelLabel="อยู่หน้านี้"
+                danger
+                onConfirm={() => {
+                  setConfirmDiscardLayout(false);
+                  setLayoutDraft(null);
+                  setStep('preview');
+                }}
+                onCancel={() => setConfirmDiscardLayout(false)}
+              />
+            )}
+            {confirmCloseLayout && (
+              <ConfirmDialog
+                message={
+                  isLayoutDirty
+                    ? 'ปิดโมดัลโดยไม่บันทึกการจัดตำแหน่งที่แก้ไขไว้?'
+                    : 'ปิดโมดัล? (การจัดตำแหน่งในหน้านี้ยังไม่ได้บันทึก)'
+                }
+                confirmLabel="ปิดโดยไม่บันทึก"
+                cancelLabel="อยู่หน้านี้"
+                danger={isLayoutDirty}
+                onConfirm={() => {
+                  setConfirmCloseLayout(false);
+                  onClose();
+                }}
+                onCancel={() => setConfirmCloseLayout(false)}
+              />
+            )}
+          </>
+        ) : step === 'select' ? (
           <>
             <div className="barcode-print-modal-toolbar">
               <div className="barcode-print-modal-search-row">
@@ -402,10 +511,29 @@ export default function BarcodePrintModal({
         ) : (
           <>
             <div className="barcode-print-modal-preview-body">
-              <p className="barcode-print-modal-preview-hint">
-                หัวกระดาษ = หมวดหมู่ · บนบาร์โค้ด = ชื่อสินค้า ·{' '}
-                <strong>{pageCount}</strong> หน้า A4 · <strong>{selectedRows.length}</strong> ป้าย
-              </p>
+              <div className="barcode-print-modal-preview-toolbar">
+                <p className="barcode-print-modal-preview-hint">
+                  หัวกระดาษ = {usesCustomLayout ? 'ชื่อกลุ่มที่ตั้ง' : 'หมวดหมู่'} · บนบาร์โค้ด = ชื่อสินค้า ·{' '}
+                  <strong>{pageCount}</strong> หน้า A4 · <strong>{selectedRows.length}</strong> ป้าย
+                </p>
+                <button
+                  type="button"
+                  className="home-btn home-btn--ghost home-btn--sm barcode-print-layout-open-btn"
+                  onClick={openLayoutStep}
+                >
+                  <LayoutGrid size={14} strokeWidth={2} aria-hidden />
+                  จัดตำแหน่งบน A4
+                </button>
+                <button
+                  type="button"
+                  className={`home-btn home-btn--ghost home-btn--sm barcode-print-one-group-btn${oneGroupPerPage ? ' is-active' : ''}`}
+                  onClick={() => setOneGroupPerPage(v => !v)}
+                  aria-pressed={oneGroupPerPage}
+                  title="แยกหน้ากระดาษตามกลุ่ม (1 กลุ่มต่อ 1 หน้า)"
+                >
+                  1 กลุ่ม/หน้า
+                </button>
+              </div>
               <div className="barcode-print-modal-preview-scaler">
                 <iframe
                   ref={previewIframeRef}
@@ -430,6 +558,14 @@ export default function BarcodePrintModal({
                 >
                   <ArrowLeft size={14} strokeWidth={2} aria-hidden />
                   ย้อนกลับ
+                </button>
+                <button
+                  type="button"
+                  className="home-btn home-btn--ghost home-btn--sm"
+                  onClick={openLayoutStep}
+                >
+                  <LayoutGrid size={14} strokeWidth={2} aria-hidden />
+                  จัดตำแหน่ง
                 </button>
                 <button
                   type="button"

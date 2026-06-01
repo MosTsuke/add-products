@@ -26,6 +26,22 @@ export const STORE_REF_COLORS: Record<number, string> = {
   2: '#f97316', // orange-500
 };
 
+/** index คอลัมน์ หมวดหมู่สินค้า ใน CSV / ตารางภาพรวม */
+export const CATEGORY_CSV_COL_INDEX = 1;
+
+/** กรองรายการหมวดหมู่ตามร้าน (0 = ทั้งหมด, ref 0 = ใช้ร่วมทุกร้าน) */
+export function filterCategoriesByStoreRef(
+  categories: string[],
+  categoryRefMap: Map<string, number> | undefined,
+  storeFilter: number,
+): string[] {
+  if (storeFilter === 0 || !categoryRefMap?.size) return categories;
+  return categories.filter(c => {
+    const r = categoryRefMap.get(c) ?? 0;
+    return r === 0 || r === storeFilter;
+  });
+}
+
 export async function fetchOptions(type: DropdownType): Promise<string[]> {
   const { data, error } = await supabase
     .from('dropdown_options')

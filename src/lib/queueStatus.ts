@@ -31,7 +31,12 @@ export function isManualQueueItem(item: QueueItem): boolean {
 }
 
 export function itemDataEqual(a: QueueItem, b: QueueItem): boolean {
-  return QUEUE_DATA_KEYS.every(k => String(a[k] ?? '').trim() === String(b[k] ?? '').trim());
+  return QUEUE_DATA_KEYS.every(k => {
+    const av = String(a[k] ?? '').trim();
+    const bv = String(b[k] ?? '').trim();
+    if (k === 'basePrice') return normalizeBasePrice(av) === normalizeBasePrice(bv);
+    return av === bv;
+  });
 }
 
 export interface QueueStatusStats {

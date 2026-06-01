@@ -14,6 +14,7 @@ import {
   FridgeConfig, FridgeDoor, FridgeShelf, defaultFridgeConfig,
 } from '@/lib/fridgeStorage';
 import { exportFridgeLayout, exportFridgeConfig, importFridgeLayout } from '@/lib/fridgeExcel';
+import { fridgeDoorToneClass } from '@/lib/fridgeDoorTones';
 import { useBodyScrollLock } from '@/lib/useBodyScrollLock';
 import { fetchOptions } from '@/lib/supabase';
 
@@ -401,7 +402,7 @@ export default function FridgeSettings() {
             {config.doors.map((door, di) => (
               <div
                 key={door.id}
-                className={`fridge-settings-door${dragOverDoor === di ? ' fridge-drag-over' : ''}`}
+                className={`fridge-settings-door ${fridgeDoorToneClass(di)}${dragOverDoor === di ? ' fridge-drag-over' : ''}`}
                 draggable
                 onDragStart={e => onDoorDragStart(e, di)}
                 onDragOver={e => onDoorDragOver(e, di)}
@@ -410,7 +411,7 @@ export default function FridgeSettings() {
               >
                 {/* door header */}
                 <div className="fridge-settings-door-header">
-                  <GripVertical size={16} color="#ccc" style={{ cursor: 'grab', flexShrink: 0 }} />
+                  <GripVertical size={16} color="rgba(255,255,255,0.7)" style={{ cursor: 'grab', flexShrink: 0 }} />
                   <input
                     className="fridge-settings-door-name"
                     value={door.name}

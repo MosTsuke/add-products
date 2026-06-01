@@ -50,6 +50,20 @@ export interface QueueItem {
   status?: QueueItemStatus;
 }
 
+/** ระหว่างพิมพ์ — รับเฉพาะตัวเลขและจุดทศนิยม (จุดได้ครั้งเดียว) */
+export function sanitizeBasePriceInput(value: string): string {
+  let out = '';
+  let hasDot = false;
+  for (const ch of value) {
+    if (ch >= '0' && ch <= '9') out += ch;
+    else if (ch === '.' && !hasDot) {
+      out += ch;
+      hasDot = true;
+    }
+  }
+  return out;
+}
+
 /** Base Price ว่าง → 0.00 · ตัวเลข → ทศนิยม 2 ตำแหน่ง (เช่น 10 → 10.00) */
 export function normalizeBasePrice(value: string): string {
   const v = value.replace(/,/g, '').trim();
@@ -123,15 +137,20 @@ export function patchQueueItemField(
   field: keyof QueueItem,
   value: string
 ): QueueItem {
-  const normalized = field === 'basePrice' ? normalizeBasePrice(value) : value;
-  const next = { ...item, [field]: normalized };
+  const next = { ...item, [field]: value };
   const colIndex = Object.entries(CSV_FIELD_BY_INDEX).find(([, f]) => f === field)?.[0];
   if (colIndex !== undefined) {
     const cols = buildCsvColsFromItem(next);
-    cols[Number(colIndex)] = normalized;
+    if (field === 'basePrice') cols[Number(colIndex)] = value;
     next.csvCols = cols;
   }
   return next;
+}
+
+/** จัดรูปแบบ Base Price ก่อนบันทึก/ออก CSV */
+export function withNormalizedBasePrice(item: QueueItem): QueueItem {
+  const bp = normalizeBasePrice(item.basePrice);
+  return bp === item.basePrice ? item : patchQueueItemField(item, 'basePrice', bp);
 }
 
 export const CSV_HEADERS = [

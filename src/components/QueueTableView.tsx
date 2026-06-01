@@ -11,6 +11,12 @@ import {
   type QueueFilterId,
   type QueueSearchFieldId,
 } from '@/lib/queueFilters';
+import {
+  CATEGORY_CSV_COL_INDEX,
+  filterCategoriesByStoreRef,
+  STORE_REF_COLORS,
+  STORE_REF_LABELS,
+} from '@/lib/supabase';
 import { createManualQueueItem } from '@/lib/queueItemFactory';
 import { isManualQueueItem } from '@/lib/queueStatus';
 import {
@@ -35,9 +41,12 @@ import {
   CSV_FIELD_BY_INDEX,
   isCsvColChangedFromFile,
   itemToCSVCols,
+  normalizeBasePrice,
+  sanitizeBasePriceInput,
   patchQueueItemField,
   QueueItem,
   TABLE_VIEW_COLUMN_INDICES,
+  withNormalizedBasePrice,
 } from '@/lib/storage';
 
 const DROPDOWN_FIELDS = new Set<keyof QueueItem>([
@@ -64,6 +73,8 @@ export interface QueueDropdownOptions {
 interface QueueTableViewProps {
   queue: QueueItem[];
   dropdownOptions: QueueDropdownOptions;
+  /** หมวดหมู่ → ref (0/1/2) สำหรับจุดสีสัญลักษณ์ร้าน */
+  categoryRefMap?: Map<string, number>;
   onClose: () => void;
   onQueueChange: (queue: QueueItem[]) => void;
 }
@@ -79,6 +90,7 @@ function queuesEqual(a: QueueItem[], b: QueueItem[]): boolean {
 export default function QueueTableView({
   queue,
   dropdownOptions,
+  categoryRefMap,
   onClose,
   onQueueChange,
 }: QueueTableViewProps) {
@@ -94,6 +106,7 @@ export default function QueueTableView({
     DEFAULT_QUEUE_SEARCH_FIELD
   );
   const [runHintKey, setRunHintKey] = useState(0);
+  const [categoryStoreFilter, setCategoryStoreFilter] = useState(0);
   const dirty = !queuesEqual(draft, savedSnapshot);
   const runHint = useMemo(
     () => describeNextRunBarcode(draft),
@@ -193,6 +206,7 @@ export default function QueueTableView({
       if (!ok) return;
       toSave = draft.filter(i => !isManualQueueItem(i) || i.nameTH.trim());
     }
+    toSave = toSave.map(withNormalizedBasePrice);
     const next = applyStatusAfterTableEdit(queue, toSave);
     setDraft(cloneQueue(next));
     onQueueChange(next);
@@ -225,11 +239,17 @@ export default function QueueTableView({
 
   const getDropdownConfig = (field: keyof QueueItem) => {
     switch (field) {
-      case 'category':
+      case 'category': {
+        const cats = filterCategoriesByStoreRef(
+          dropdownOptions.categories,
+          categoryRefMap,
+          categoryStoreFilter,
+        );
         return {
-          options: dropdownOptions.categories,
-          prepend: dropdownOptions.categories.includes('อื่นๆ') ? [] : ['อื่นๆ'],
+          options: cats,
+          prepend: cats.includes('อื่นๆ') ? [] : ['อื่นๆ'],
         };
+      }
       case 'productType':
         return { options: dropdownOptions.productTypes, prepend: [] as string[] };
       case 'unit':
@@ -261,6 +281,7 @@ export default function QueueTableView({
     const aria = `${CSV_HEADERS[colIndex]} แถว ${rowIndex + 1}`;
     const isBarcode = field === 'barcode';
     const isNameTH = field === 'nameTH';
+    const isBasePrice = field === 'basePrice';
     const tdClass = cellClass(
       item,
       colIndex,
@@ -269,6 +290,7 @@ export default function QueueTableView({
         'queue-csv-table-editable',
         isBarcode ? 'queue-csv-table-cell--barcode' : '',
         isNameTH ? 'queue-csv-table-cell--name-th' : '',
+        isBasePrice ? 'queue-csv-table-cell--base-price' : '',
       ]
         .filter(Boolean)
         .join(' ')
@@ -287,6 +309,7 @@ export default function QueueTableView({
             onChange={v => updateField(item.id, field, v)}
             placeholder="เลือก…"
             inputTitle={cellHoverTitle(String(item[field] ?? ''))}
+            optionMeta={field === 'category' ? categoryRefMap : undefined}
           />
         </td>
       );
@@ -357,8 +380,18 @@ export default function QueueTableView({
       <td key={colIndex} className={tdClass}>
         <input
           type="text"
+          inputMode={isBasePrice ? 'decimal' : undefined}
           value={value}
-          onChange={e => updateField(item.id, field, e.target.value)}
+          className={isBasePrice ? 'queue-csv-table-base-price-input' : undefined}
+          onChange={e => {
+            const raw = e.target.value;
+            updateField(item.id, field, isBasePrice ? sanitizeBasePriceInput(raw) : raw);
+          }}
+          onBlur={
+            isBasePrice
+              ? e => updateField(item.id, field, normalizeBasePrice(e.target.value))
+              : undefined
+          }
           aria-label={aria}
           title={cellHoverTitle(String(value))}
         />
@@ -450,9 +483,36 @@ export default function QueueTableView({
                 <tr>
                   <th className="queue-csv-table-sticky-col queue-csv-table-status">สถานะ</th>
                   <th className="queue-csv-table-sticky-col queue-csv-table-num">#</th>
-                  {TABLE_VIEW_COLUMN_INDICES.map(colIndex => (
-                    <th key={colIndex}>{CSV_HEADERS[colIndex]}</th>
-                  ))}
+                  {TABLE_VIEW_COLUMN_INDICES.map(colIndex => {
+                    if (
+                      colIndex === CATEGORY_CSV_COL_INDEX &&
+                      categoryRefMap &&
+                      categoryRefMap.size > 0
+                    ) {
+                      return (
+                        <th key={colIndex} className="queue-csv-table-th-category">
+                          <div className="queue-csv-table-category-th">
+                            <span>{CSV_HEADERS[colIndex]}</span>
+                            <label className="queue-csv-table-store-filter">
+                              <span className="queue-csv-table-store-filter-dot" style={{ background: STORE_REF_COLORS[categoryStoreFilter] }} aria-hidden />
+                              <select
+                                value={categoryStoreFilter}
+                                onChange={e => setCategoryStoreFilter(Number(e.target.value))}
+                                aria-label="กรองหมวดหมู่ตามร้าน"
+                              >
+                                {[0, 1, 2].map(ref => (
+                                  <option key={ref} value={ref}>
+                                    {STORE_REF_LABELS[ref]}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                          </div>
+                        </th>
+                      );
+                    }
+                    return <th key={colIndex}>{CSV_HEADERS[colIndex]}</th>;
+                  })}
                   <th className="queue-csv-table-actions-col" />
                 </tr>
               </thead>

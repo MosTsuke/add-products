@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   RefrigeratorIcon, Settings, RotateCcw, Minus, Plus, X, ClipboardList, LayoutGrid, Sparkles, Check,
-  ChevronLeft, ChevronRight, Rows3, GalleryHorizontal,
+  ChevronLeft, ChevronRight, Rows3, GalleryHorizontal, Search,
 } from 'lucide-react';
 import Link from 'next/link';
 import Navbar from '@/components/Navbar';
@@ -12,6 +12,11 @@ import {
   getFridgeConfig, getFridgeLayout, FridgeConfig, RestockItem,
 } from '@/lib/fridgeStorage';
 import { useBodyScrollLock } from '@/lib/useBodyScrollLock';
+import {
+  fridgeDoorToneClass,
+  fridgeDoorToneIndexForDoorId,
+  fridgeDoorPosToneClass,
+} from '@/lib/fridgeDoorTones';
 
 type ViewMode = 'text' | 'visual';
 type LayoutMode = 'scroll' | 'slide';
@@ -33,6 +38,7 @@ export default function FridgePage() {
   const [layout, setLayout] = useState<ReturnType<typeof getFridgeLayout>>({});
   const [restock, setRestock] = useState<RestockItem[]>([]);
   const [showList, setShowList] = useState(false);
+  const [restockSearch, setRestockSearch] = useState('');
   const [viewMode, setViewMode] = useState<ViewMode>('text');
   const [layoutMode, setLayoutMode] = useState<LayoutMode>('scroll');
   const [activeDoor, setActiveDoor] = useState(0);
@@ -126,6 +132,16 @@ export default function FridgePage() {
     () => [...restock].sort((a, b) => Number(!!a.checked) - Number(!!b.checked)),
     [restock],
   );
+  const doorIdsInOrder = useMemo(() => config.doors.map(d => d.id), [config.doors]);
+  const filteredRestock = useMemo(() => {
+    const q = restockSearch.trim().toLowerCase();
+    if (!q) return sortedRestock;
+    return sortedRestock.filter(item => item.productName.toLowerCase().includes(q));
+  }, [sortedRestock, restockSearch]);
+
+  useEffect(() => {
+    if (!showList) setRestockSearch('');
+  }, [showList]);
 
   useBodyScrollLock(showList || !!qtyModal);
 
@@ -301,7 +317,7 @@ export default function FridgePage() {
   };
 
   /** Shared door content used in both scroll and slide modes */
-  const renderDoor = (door: FridgeConfig['doors'][number]) => (
+  const renderDoor = (door: FridgeConfig['doors'][number], doorIndex: number) => (
     <>
       <div className="fridge-door-header">
         <div className="fridge-door-header-inner">
@@ -495,10 +511,10 @@ export default function FridgePage() {
                 {config.doors.map((door, di) => (
                   <div
                     key={door.id}
-                    className={`fridge-door fridge-carousel-item${di === activeDoor ? ' fridge-carousel-item--active' : di < activeDoor ? ' fridge-carousel-item--prev' : ' fridge-carousel-item--next'}`}
+                    className={`fridge-door ${fridgeDoorToneClass(di)} fridge-carousel-item${di === activeDoor ? ' fridge-carousel-item--active' : di < activeDoor ? ' fridge-carousel-item--prev' : ' fridge-carousel-item--next'}`}
                     aria-hidden={di !== activeDoor}
                   >
-                    {renderDoor(door)}
+                    {renderDoor(door, di)}
                   </div>
                 ))}
               </div>
@@ -509,9 +525,9 @@ export default function FridgePage() {
               className="fridge-doors-grid"
               style={{ gridTemplateColumns: `repeat(${config.doors.length}, 1fr)` }}
             >
-              {config.doors.map(door => (
-                <div key={door.id} className="fridge-door">
-                  {renderDoor(door)}
+              {config.doors.map((door, di) => (
+                <div key={door.id} className={`fridge-door ${fridgeDoorToneClass(di)}`}>
+                  {renderDoor(door, di)}
                 </div>
               ))}
             </div>
@@ -529,7 +545,10 @@ export default function FridgePage() {
                 </div>
                 <div className="fridge-modal-body">
                   <p className="fridge-qty-product">{qtyModal.productName}</p>
-                  <p className="fridge-qty-pos">
+                  <p className={fridgeDoorPosToneClass(
+                    fridgeDoorToneIndexForDoorId(qtyModal.doorId, doorIdsInOrder),
+                    'fridge-qty-pos',
+                  )}>
                     {qtyModal.doorName} · {qtyModal.shelfName}
                   </p>
                   {qtyModal.parLevel != null && (
@@ -609,8 +628,37 @@ export default function FridgePage() {
                     <p>ยังไม่มีรายการ — กดสินค้าในตู้ (+1) หรือกดค้าง ~1 วินาที</p>
                   </div>
                 ) : (
+                  <>
+                    <div className="fridge-restock-search">
+                      <label className="fridge-restock-search-wrap">
+                        <Search size={16} className="fridge-restock-search-icon" aria-hidden />
+                        <input
+                          type="search"
+                          value={restockSearch}
+                          onChange={e => setRestockSearch(e.target.value)}
+                          placeholder="ค้นหาชื่อสินค้า…"
+                          aria-label="ค้นหาชื่อสินค้าในรายการเติม"
+                          autoComplete="off"
+                        />
+                        {restockSearch.trim() !== '' && (
+                          <button
+                            type="button"
+                            className="fridge-restock-search-clear"
+                            onClick={() => setRestockSearch('')}
+                            aria-label="ล้างคำค้นหา"
+                          >
+                            <X size={14} />
+                          </button>
+                        )}
+                      </label>
+                    </div>
+                    {filteredRestock.length === 0 ? (
+                      <div className="fridge-restock-empty fridge-restock-empty--filter">
+                        <p>ไม่พบ &quot;{restockSearch.trim()}&quot;</p>
+                      </div>
+                    ) : (
                   <div className="fridge-restock-list">
-                    {sortedRestock.map(item => {
+                    {filteredRestock.map(item => {
                       const slotItem = layout[item.slotKey];
                       const remaining = slotItem?.quantity != null ? Math.max(0, slotItem.quantity - item.count) : null;
                       const stockPct = remaining != null && slotItem?.quantity ? remaining / slotItem.quantity : null;
@@ -629,7 +677,10 @@ export default function FridgePage() {
                             <Check size={16} strokeWidth={2.5} />
                           </button>
                           <div className="fridge-restock-item-info">
-                            <span className="fridge-restock-item-pos">{item.doorName} · {item.shelfName}</span>
+                            <span className={fridgeDoorPosToneClass(
+                              fridgeDoorToneIndexForDoorId(item.doorId, doorIdsInOrder),
+                              'fridge-restock-item-pos',
+                            )}>{item.doorName} · {item.shelfName}</span>
                             <span className="fridge-restock-item-name">{item.productName}</span>
                             {remaining != null && (
                               <span className="fridge-restock-item-remaining">เหลือในตู้ {remaining}/{slotItem!.quantity}</span>
@@ -658,6 +709,8 @@ export default function FridgePage() {
                       );
                     })}
                   </div>
+                    )}
+                  </>
                 )}
               </div>
             </div>

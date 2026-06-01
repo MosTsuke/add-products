@@ -35,11 +35,18 @@ import { resetBarcodeRunCounter, syncBarcodeRunCounter } from '@/lib/barcodeGene
 import {
   buildCsvColsFromItem,
   normalizeBasePrice,
+  sanitizeBasePriceInput,
   patchQueueItemField,
   storage,
   QueueItem,
 } from '@/lib/storage';
-import { fetchOptions, fetchCategoryOptions } from '@/lib/supabase';
+import {
+  fetchOptions,
+  fetchCategoryOptions,
+  filterCategoriesByStoreRef,
+  STORE_REF_COLORS,
+  STORE_REF_LABELS,
+} from '@/lib/supabase';
 import {
   handleBarcodeInputChange,
   handleBarcodeInputKeyDown,
@@ -87,16 +94,10 @@ function ProductMetaFields({
 }) {
   const [catFilter, setCatFilter] = useState<number>(0);
 
-  const STORE_COLORS: Record<number, string> = { 0: '#9ca3af', 1: '#3b82f6', 2: '#f97316' };
-  const STORE_LABELS: Record<number, string> = { 0: 'ทั้งหมด', 1: 'ร้าน 1', 2: 'ร้าน 2' };
-
-  const filteredCategories = useMemo(() => {
-    if (catFilter === 0 || !categoryRefMap) return categories;
-    return categories.filter(c => {
-      const r = categoryRefMap.get(c) ?? 0;
-      return r === 0 || r === catFilter;
-    });
-  }, [categories, catFilter, categoryRefMap]);
+  const filteredCategories = useMemo(
+    () => filterCategoriesByStoreRef(categories, categoryRefMap, catFilter),
+    [categories, catFilter, categoryRefMap],
+  );
 
   const categoryPrepend = filteredCategories.includes('อื่นๆ') ? [] : ['อื่นๆ'];
 
@@ -111,11 +112,11 @@ function ProductMetaFields({
                 key={r}
                 type="button"
                 className={`home-cat-filter-btn${catFilter === r ? ' home-cat-filter-btn--active' : ''}`}
-                style={catFilter === r ? { borderColor: STORE_COLORS[r], color: STORE_COLORS[r], background: `${STORE_COLORS[r]}14` } : {}}
+                style={catFilter === r ? { borderColor: STORE_REF_COLORS[r], color: STORE_REF_COLORS[r], background: `${STORE_REF_COLORS[r]}14` } : {}}
                 onClick={() => setCatFilter(r)}
               >
-                {r !== 0 && <span style={{ width: 7, height: 7, borderRadius: '50%', background: STORE_COLORS[r], display: 'inline-block' }} />}
-                {STORE_LABELS[r]}
+                {r !== 0 && <span style={{ width: 7, height: 7, borderRadius: '50%', background: STORE_REF_COLORS[r], display: 'inline-block' }} />}
+                {STORE_REF_LABELS[r]}
               </button>
             ))}
           </div>
@@ -168,13 +169,13 @@ function ProductMetaFields({
     <div className="field">
       <label>ราคาฐาน (บาท)</label>
       <input
-        type="number"
+        type="text"
+        inputMode="decimal"
         value={basePrice}
-        onChange={e => onBasePrice(e.target.value)}
+        onChange={e => onBasePrice(sanitizeBasePriceInput(e.target.value))}
         onBlur={() => onBasePrice(normalizeBasePrice(basePrice))}
         placeholder="0.00"
-        step="0.01"
-        min="0"
+        autoComplete="off"
       />
     </div>
   );
@@ -880,6 +881,7 @@ export default function Home() {
             units,
             priceTypes,
           }}
+          categoryRefMap={categoryRefMap}
           onClose={() => setTableViewOpen(false)}
           onQueueChange={handleQueueChange}
         />
