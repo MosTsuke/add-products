@@ -1,13 +1,20 @@
 'use client';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeft, ChevronRight, FileText, LayoutGrid, Printer, Sticker, X } from 'lucide-react';
+import { ArrowDownWideNarrow, ArrowLeft, ChevronRight, FileText, LayoutGrid, Printer, Sticker, X } from 'lucide-react';
 import BarcodePrintLayoutStep from '@/components/BarcodePrintLayoutStep';
 import ConfirmDialog from '@/components/ConfirmDialog';
-import { isGeneratedRunBarcode } from '@/lib/barcodeGenerate';
+import {
+  canSortByProductPrice,
+  isGeneratedPriceBarcode,
+  isGeneratedRunBarcode,
+  isProductPriceBarcode,
+} from '@/lib/barcodeGenerate';
 import {
   createDefaultBarcodePrintLayout,
   buildBarcodePrintRowsFromLayout,
+  sortBarcodePrintLayoutByPrice,
+  sortQueueItemsByProductPrice,
   syncBarcodePrintLayout,
   type BarcodePrintLayout,
 } from '@/lib/barcodePrintLayout';
@@ -22,7 +29,7 @@ import {
 } from '@/lib/barcodePrintSheet';
 import { QueueItem } from '@/lib/storage';
 
-type ListFilter = 'all' | 'generated' | 'from-file' | 'selected';
+type ListFilter = 'all' | 'generated' | 'from-file' | 'price' | 'selected';
 type ModalStep = 'select' | 'preview' | 'layout';
 type BarcodeSearchField = 'product' | 'category';
 
@@ -58,6 +65,7 @@ function matchesListFilter(
 ): boolean {
   if (filter === 'selected') return selectedIds.has(item.id);
   if (filter === 'generated') return isGeneratedRunBarcode(item.barcode);
+  if (filter === 'price') return isProductPriceBarcode(item.barcode);
   if (filter === 'from-file') return !isGeneratedRunBarcode(item.barcode);
   return true;
 }
@@ -115,6 +123,21 @@ export default function BarcodePrintModal({
     setSelectedIds(new Set(defaultSelectedIds));
   }, [defaultSelectedIds]);
 
+  /** แท็บราคาสินค้า — ตัดรายการที่เลือกค้าง (เช่น 200…) ที่ไม่ใช่ราคาสินค้า */
+  useEffect(() => {
+    if (listFilter !== 'price') return;
+    setSelectedIds(prev => {
+      const next = new Set<string>();
+      for (const item of printable) {
+        if (prev.has(item.id) && isProductPriceBarcode(item.barcode)) {
+          next.add(item.id);
+        }
+      }
+      if (next.size === prev.size) return prev;
+      return next;
+    });
+  }, [listFilter, printable]);
+
   const selectedIdsKey = useMemo(
     () => [...selectedIds].sort().join(','),
     [selectedIds],
@@ -152,6 +175,8 @@ export default function BarcodePrintModal({
     return printable.filter(i => idSet.has(i.id));
   }, [printable, selectedIds]);
 
+  const showSortByPrice = useMemo(() => canSortByProductPrice(selectedItems), [selectedItems]);
+
   const selectedRows = useMemo(() => {
     if (printLayout) {
       return buildBarcodePrintRowsFromLayout(
@@ -180,6 +205,25 @@ export default function BarcodePrintModal({
     return () => window.clearTimeout(t);
   }, [step, previewHtml, resizePreviewIframe]);
 
+  const sortLayoutByProductPrice = (base: BarcodePrintLayout) => {
+    const sortedItems = sortQueueItemsByProductPrice(selectedItems);
+    return sortBarcodePrintLayoutByPrice(
+      syncBarcodePrintLayout(base, sortedItems.map(i => i.id)),
+      sortedItems
+    );
+  };
+
+  const applySortByProductPrice = () => {
+    if (step === 'layout' && layoutDraft) {
+      const next = sortLayoutByProductPrice(layoutDraft);
+      setLayoutDraft(next);
+      return;
+    }
+    const sortedItems = sortQueueItemsByProductPrice(selectedItems);
+    const base = printLayout ?? createDefaultBarcodePrintLayout(sortedItems);
+    setPrintLayout(sortLayoutByProductPrice(base));
+  };
+
   const openLayoutStep = () => {
     const base = printLayout ?? createDefaultBarcodePrintLayout(selectedItems);
     const synced = syncBarcodePrintLayout(base, selectedItems.map(i => i.id));
@@ -207,6 +251,10 @@ export default function BarcodePrintModal({
   };
 
   const setFilteredSelection = (select: boolean) => {
+    if (select && listFilter === 'price') {
+      setSelectedIds(new Set(filtered.map(i => i.id)));
+      return;
+    }
     setSelectedIds(prev => {
       const next = new Set(prev);
       for (const item of filtered) {
@@ -221,6 +269,13 @@ export default function BarcodePrintModal({
     setSelectedIds(
       new Set(printable.filter(i => isGeneratedRunBarcode(i.barcode)).map(i => i.id))
     );
+  };
+
+  const selectProductPrice = () => {
+    setSelectedIds(
+      new Set(printable.filter(i => isProductPriceBarcode(i.barcode)).map(i => i.id))
+    );
+    setListFilter('price');
   };
 
   const handlePrint = () => {
@@ -243,6 +298,7 @@ export default function BarcodePrintModal({
   };
 
   const generatedCount = printable.filter(i => isGeneratedRunBarcode(i.barcode)).length;
+  const priceCount = printable.filter(i => isProductPriceBarcode(i.barcode)).length;
   const fromFileCount = printable.length - generatedCount;
 
   const panelClass =
@@ -294,6 +350,8 @@ export default function BarcodePrintModal({
               items={selectedItems}
               layout={layoutDraft}
               onLayoutChange={setLayoutDraft}
+              showSortByPrice={showSortByPrice}
+              onSortByPrice={applySortByProductPrice}
               onBack={() => {
                 if (!isLayoutDirty) {
                   setLayoutDraft(null);
@@ -404,6 +462,23 @@ export default function BarcodePrintModal({
                 </button>
                 <button
                   type="button"
+                  className={`barcode-print-modal-filter${listFilter === 'price' ? ' is-active' : ''}`}
+                  onClick={() => {
+                    setListFilter('price');
+                    setSelectedIds(
+                      new Set(
+                        printable
+                          .filter(i => isProductPriceBarcode(i.barcode))
+                          .map(i => i.id)
+                      )
+                    );
+                  }}
+                  disabled={priceCount === 0}
+                >
+                  ราคาสินค้า ({priceCount})
+                </button>
+                <button
+                  type="button"
                   className={`barcode-print-modal-filter${listFilter === 'from-file' ? ' is-active' : ''}`}
                   onClick={() => setListFilter('from-file')}
                   disabled={fromFileCount === 0}
@@ -426,6 +501,14 @@ export default function BarcodePrintModal({
                   onClick={selectGenerated}
                 >
                   เลือกสร้างใหม่ทั้งหมด
+                </button>
+                <button
+                  type="button"
+                  className="home-btn home-btn--ghost home-btn--sm"
+                  onClick={selectProductPrice}
+                  disabled={priceCount === 0}
+                >
+                  เลือกราคาสินค้าทั้งหมด
                 </button>
                 <button
                   type="button"
@@ -455,14 +538,27 @@ export default function BarcodePrintModal({
                 <p className="barcode-print-modal-empty">
                   {listFilter === 'selected'
                     ? 'ยังไม่มีรายการที่เลือก — ติ๊ก checkbox หรือเปลี่ยนตัวกรอง'
-                    : 'ไม่พบรายการตามคำค้นหา/ตัวกรอง'}
+                    : listFilter === 'price'
+                      ? 'ไม่มีรายการที่ barcode ขึ้นต้นด้วย P'
+                      : 'ไม่พบรายการตามคำค้นหา/ตัวกรอง'}
                 </p>
               ) : (
                 <ul className="barcode-print-modal-list">
                   {filtered.map(item => {
                     const checked = selectedIds.has(item.id);
-                    const generated = isGeneratedRunBarcode(item.barcode);
-                    const categoryLabel = item.category.trim() || '(ไม่มีหมวดหมู่)';
+                    const generated = isGeneratedPriceBarcode(item.barcode);
+                    const priceTag = isProductPriceBarcode(item.barcode);
+                    const rowCategory = item.category.trim() || '(ไม่มีหมวดหมู่)';
+                    const tagClass = generated
+                      ? ' barcode-print-modal-tag--gen'
+                      : priceTag
+                        ? ' barcode-print-modal-tag--price'
+                        : '';
+                    const tagLabel = generated
+                      ? 'สร้างใหม่'
+                      : priceTag
+                        ? 'ราคาสินค้า'
+                        : 'จากไฟล์';
                     return (
                       <li key={item.id}>
                         <label className={`barcode-print-modal-row${checked ? ' is-checked' : ''}`}>
@@ -472,18 +568,14 @@ export default function BarcodePrintModal({
                             onChange={() => toggleOne(item.id)}
                           />
                           <span className="barcode-print-modal-row-main">
-                            <span className="barcode-print-modal-row-name" title={categoryLabel}>
-                              {categoryLabel}
+                            <span className="barcode-print-modal-row-name" title={rowCategory}>
+                              {rowCategory}
                             </span>
                             <span className="barcode-print-modal-row-sub" title={item.nameTH}>
                               {item.nameTH.trim() || '(ไม่มีชื่อ)'} · {item.barcode.trim()}
                             </span>
                           </span>
-                          <span
-                            className={`barcode-print-modal-tag${generated ? ' barcode-print-modal-tag--gen' : ''}`}
-                          >
-                            {generated ? 'สร้างใหม่' : 'จากไฟล์'}
-                          </span>
+                          <span className={`barcode-print-modal-tag${tagClass}`}>{tagLabel}</span>
                         </label>
                       </li>
                     );
@@ -527,6 +619,17 @@ export default function BarcodePrintModal({
                   <strong>{pageCount}</strong> หน้า A4 · <strong>{selectedRows.length}</strong> ป้าย · Word =
                   layout เหมือนตัวอย่าง (ชื่อแก้ได้ · บาร์โค้ดเป็นรูป)
                 </p>
+                {showSortByPrice && (
+                  <button
+                    type="button"
+                    className="home-btn home-btn--ghost home-btn--sm barcode-print-sort-price-btn"
+                    onClick={applySortByProductPrice}
+                    title="เรียงป้ายตามราคาใน barcode (น้อยไปมาก)"
+                  >
+                    <ArrowDownWideNarrow size={14} strokeWidth={2} aria-hidden />
+                    เรียงราคา
+                  </button>
+                )}
                 <button
                   type="button"
                   className="home-btn home-btn--ghost home-btn--sm barcode-print-layout-open-btn"

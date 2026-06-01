@@ -1,6 +1,16 @@
 'use client';
 import { useMemo, useState } from 'react';
-import { ArrowLeft, CheckSquare, ChevronDown, ChevronUp, LayoutGrid, Plus, Square, Trash2 } from 'lucide-react';
+import {
+  ArrowDownWideNarrow,
+  ArrowLeft,
+  CheckSquare,
+  ChevronDown,
+  ChevronUp,
+  LayoutGrid,
+  Plus,
+  Square,
+  Trash2,
+} from 'lucide-react';
 import BarcodePrintGroupOrderModal from './BarcodePrintGroupOrderModal';
 import {
   addBarcodePrintGroup,
@@ -15,6 +25,8 @@ interface BarcodePrintLayoutStepProps {
   items: QueueItem[];
   layout: BarcodePrintLayout;
   onLayoutChange: (layout: BarcodePrintLayout) => void;
+  showSortByPrice?: boolean;
+  onSortByPrice?: () => void;
   onBack: () => void;
   onApply: () => void;
 }
@@ -23,6 +35,8 @@ export default function BarcodePrintLayoutStep({
   items,
   layout,
   onLayoutChange,
+  showSortByPrice = false,
+  onSortByPrice,
   onBack,
   onApply,
 }: BarcodePrintLayoutStepProps) {
@@ -159,6 +173,17 @@ export default function BarcodePrintLayoutStep({
               เลือก <strong>{selectedCount}</strong>/{items.length}
             </span>
             <div className="barcode-print-layout-bulk-right">
+              {showSortByPrice && onSortByPrice && (
+                <button
+                  type="button"
+                  className="home-btn home-btn--ghost home-btn--sm barcode-print-sort-price-btn"
+                  onClick={onSortByPrice}
+                  title="เรียงป้ายตามราคาใน barcode (น้อยไปมาก)"
+                >
+                  <ArrowDownWideNarrow size={14} strokeWidth={2} aria-hidden />
+                  เรียงราคา
+                </button>
+              )}
               <button
                 type="button"
                 className="home-btn home-btn--ghost home-btn--sm barcode-print-layout-order-btn"

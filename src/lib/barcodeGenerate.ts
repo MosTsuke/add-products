@@ -22,6 +22,40 @@ export function isGeneratedRunBarcode(barcode: string): boolean {
   return parseNewRunSerial(barcode) != null;
 }
 
+/**
+ * barcode ราคาสินค้าจากไฟล์ — ขึ้นต้น P แต่ไม่ใช่เลขรัน 200… ที่ระบบสร้าง
+ * (ไม่รวม 200… และไม่รวม P200xxxxxxxxxx = ราคาที่ gen ใหม่)
+ */
+export function isProductPriceBarcode(barcode: string): boolean {
+  const bc = normalizeBarcodeInput(barcode);
+  if (!bc.startsWith('P')) return false;
+  if (isGeneratedRunBarcode(bc)) return false;
+  const afterP = bc.slice(1);
+  if (afterP.length > 0 && isGeneratedRunBarcode(afterP)) return false;
+  return true;
+}
+
+/** barcode ราคาที่ระบบสร้างใหม่ (200… หรือ P + 200…) */
+export function isGeneratedPriceBarcode(barcode: string): boolean {
+  const bc = normalizeBarcodeInput(barcode);
+  if (isGeneratedRunBarcode(bc)) return true;
+  return bc.startsWith('P') && isGeneratedRunBarcode(bc.slice(1));
+}
+
+/** อ่านราคาจาก barcode ราคาสินค้า (เช่น P0100 → 100, P0010 → 10) */
+export function parseProductPriceFromBarcode(barcode: string): number | null {
+  const bc = normalizeBarcodeInput(barcode);
+  if (!isProductPriceBarcode(bc)) return null;
+  const digits = bc.slice(1);
+  if (!/^\d+$/.test(digits)) return null;
+  const value = parseInt(digits, 10);
+  return Number.isFinite(value) ? value : null;
+}
+
+export function canSortByProductPrice(items: { barcode: string }[]): boolean {
+  return items.length > 0 && items.every(i => isProductPriceBarcode(i.barcode));
+}
+
 export function maxRunSerialInBarcodes(barcodes: Iterable<string>): number {
   let max = 0;
   for (const bc of barcodes) {

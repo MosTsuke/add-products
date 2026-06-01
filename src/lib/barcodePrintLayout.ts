@@ -1,3 +1,4 @@
+import { parseProductPriceFromBarcode } from './barcodeGenerate';
 import { BarcodePrintRow, queueItemToPrintRow, sortQueueItemsForBarcodePrint } from './barcodePrintSheet';
 import { QueueItem } from './storage';
 
@@ -182,4 +183,41 @@ export function setBarcodePrintGroupOrder(
     ...layout,
     orderByGroup: { ...layout.orderByGroup, [groupId]: uniqueInOrder(orderedItemIds) },
   };
+}
+
+function compareByProductPrice(
+  a: QueueItem,
+  b: QueueItem,
+): number {
+  const pa = parseProductPriceFromBarcode(a.barcode) ?? Number.POSITIVE_INFINITY;
+  const pb = parseProductPriceFromBarcode(b.barcode) ?? Number.POSITIVE_INFINITY;
+  if (pa !== pb) return pa - pb;
+  return a.barcode.localeCompare(b.barcode);
+}
+
+/** เรียงลำดับภายในแต่ละกลุ่มตามราคาใน barcode (น้อย → มาก) */
+export function sortBarcodePrintLayoutByPrice(
+  layout: BarcodePrintLayout,
+  items: QueueItem[],
+): BarcodePrintLayout {
+  const byId = new Map(items.map(i => [i.id, i]));
+  const orderByGroup: Record<string, string[]> = {};
+
+  for (const group of layout.groups) {
+    const ids = layout.orderByGroup[group.id] ?? [];
+    const sorted = [...ids]
+      .map(id => byId.get(id))
+      .filter((item): item is QueueItem => item != null)
+      .sort(compareByProductPrice)
+      .map(item => item.id);
+    const sortedSet = new Set(sorted);
+    const rest = ids.filter(id => !sortedSet.has(id));
+    orderByGroup[group.id] = [...sorted, ...rest];
+  }
+
+  return { ...layout, orderByGroup };
+}
+
+export function sortQueueItemsByProductPrice(items: QueueItem[]): QueueItem[] {
+  return [...items].sort(compareByProductPrice);
 }
