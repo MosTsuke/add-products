@@ -11,13 +11,14 @@ import {
   syncBarcodePrintLayout,
   type BarcodePrintLayout,
 } from '@/lib/barcodePrintLayout';
+import { downloadBarcodePrintDoc } from '@/lib/barcodeDocxExport';
 import {
   buildBarcodePrintHtml,
   buildBarcodePrintRows,
   countBarcodePrintPages,
-  downloadBarcodePrintDoc,
   getPrintableQueueItems,
-  openBarcodePrintPreview,
+  printBarcodeFromIframe,
+  printBarcodeLabels,
 } from '@/lib/barcodePrintSheet';
 import { QueueItem } from '@/lib/storage';
 
@@ -224,12 +225,21 @@ export default function BarcodePrintModal({
 
   const handlePrint = () => {
     if (selectedRows.length === 0) return;
-    openBarcodePrintPreview(selectedRows, 'ป้าย Barcode', { oneGroupPerPage });
+    const opts = { oneGroupPerPage };
+    if (step === 'preview' && printBarcodeFromIframe(previewIframeRef.current)) return;
+    if (printBarcodeLabels(selectedRows, 'ป้าย Barcode', opts)) return;
+    alert(
+      'พิมพ์ไม่สำเร็จ — ลองกด "ดาวน์โหลด Word" แล้วเปิดไฟล์จากนั้น หรืออนุญาต popup ของเว็บนี้แล้วลองอีกครั้ง'
+    );
   };
 
-  const handleDownloadDoc = () => {
+  const handleDownloadDoc = async () => {
     if (selectedRows.length === 0) return;
-    downloadBarcodePrintDoc(selectedRows, undefined, 'ป้าย Barcode', { oneGroupPerPage });
+    try {
+      await downloadBarcodePrintDoc(selectedRows, undefined, 'ป้าย Barcode', { oneGroupPerPage });
+    } catch {
+      alert('ดาวน์โหลด Word ไม่สำเร็จ — ลองใหม่อีกครั้ง');
+    }
   };
 
   const generatedCount = printable.filter(i => isGeneratedRunBarcode(i.barcode)).length;
@@ -514,7 +524,8 @@ export default function BarcodePrintModal({
               <div className="barcode-print-modal-preview-toolbar">
                 <p className="barcode-print-modal-preview-hint">
                   หัวกระดาษ = {usesCustomLayout ? 'ชื่อกลุ่มที่ตั้ง' : 'หมวดหมู่'} · บนบาร์โค้ด = ชื่อสินค้า ·{' '}
-                  <strong>{pageCount}</strong> หน้า A4 · <strong>{selectedRows.length}</strong> ป้าย
+                  <strong>{pageCount}</strong> หน้า A4 · <strong>{selectedRows.length}</strong> ป้าย · Word =
+                  layout เหมือนตัวอย่าง (ชื่อแก้ได้ · บาร์โค้ดเป็นรูป)
                 </p>
                 <button
                   type="button"
@@ -573,7 +584,7 @@ export default function BarcodePrintModal({
                   onClick={handleDownloadDoc}
                 >
                   <FileText size={14} strokeWidth={2} aria-hidden />
-                  ดาวน์โหลด Word
+                  ดาวน์โหลด Word (.docx)
                 </button>
                 <button
                   type="button"

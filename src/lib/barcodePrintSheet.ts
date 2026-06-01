@@ -79,18 +79,54 @@ export function countBarcodePrintStats(items: QueueItem[]) {
   };
 }
 
-function renderBarcodeSvg(barcode: string): string {
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  JsBarcode(svg, barcode, {
-    format: 'CODE128',
-    width: 1.1,
-    height: 30,
-    displayValue: true,
-    fontSize: 10,
-    margin: 2,
-    background: '#ffffff',
-  });
-  return new XMLSerializer().serializeToString(svg);
+/** รูปแบบที่สแกนเนอร์ร้านรับบ่อย — เลข 13 หลักใช้ EAN-13 */
+function jsBarcodeFormat(code: string): string {
+  const digits = code.replace(/\D/g, '');
+  if (digits.length === 13) return 'EAN13';
+  if (digits.length === 8) return 'EAN8';
+  return 'CODE128';
+}
+
+const BARCODE_CANVAS_OPTS = {
+  width: 2,
+  height: 44,
+  displayValue: true,
+  fontSize: 11,
+  margin: 6,
+  background: '#ffffff',
+};
+
+export function renderBarcodeToCanvas(barcode: string): HTMLCanvasElement {
+  const code = barcode.trim();
+  const canvas = document.createElement('canvas');
+  const format = jsBarcodeFormat(code);
+  try {
+    JsBarcode(canvas, code, { ...BARCODE_CANVAS_OPTS, format });
+  } catch {
+    JsBarcode(canvas, code, { ...BARCODE_CANVAS_OPTS, format: 'CODE128' });
+  }
+  return canvas;
+}
+
+export function barcodePngBytes(barcode: string): Uint8Array {
+  const dataUrl = renderBarcodeToCanvas(barcode).toDataURL('image/png');
+  const base64 = dataUrl.split(',')[1] ?? '';
+  const bin = atob(base64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+/** เรนเดอร์เป็น PNG สำหรับ HTML พิมพ์ */
+function renderBarcodeMarkup(barcode: string, extraImgAttrs = ''): string {
+  const code = barcode.trim();
+  if (!code) return '';
+  const canvas = renderBarcodeToCanvas(code);
+  const w = canvas.width;
+  const h = canvas.height;
+  const src = canvas.toDataURL('image/png');
+  const extra = extraImgAttrs ? ` ${extraImgAttrs}` : '';
+  return `<img class="barcode-img" src="${src}" width="${w}" height="${h}" alt="${escapeHtml(code)}" decoding="sync"${extra} />`;
 }
 
 function escapeHtml(s: string): string {
@@ -111,11 +147,11 @@ export function buildBarcodePrintHtml(
 }
 
 function renderLabel(row: BarcodePrintRow): string {
-  const svg = renderBarcodeSvg(row.barcode);
+  const markup = renderBarcodeMarkup(row.barcode);
   return `
       <div class="label">
         <p class="product">${escapeHtml(row.nameTH)}</p>
-        <div class="barcode">${svg}</div>
+        <div class="barcode">${markup}</div>
       </div>`;
 }
 
@@ -222,6 +258,10 @@ function paginateBarcodeGroups(
 export function countBarcodePrintPages(rows: BarcodePrintRow[], options?: { oneGroupPerPage?: boolean }): number {
   if (rows.length === 0) return 0;
   return paginateBarcodeGroups(groupRowsByCategory(rows), options).length;
+}
+
+export function getBarcodePrintPages(rows: BarcodePrintRow[], options?: BarcodePrintOptions) {
+  return paginateBarcodeGroups(groupRowsByCategory(rows), options);
 }
 
 function renderPageChunk(chunk: PageChunk): string {
@@ -345,15 +385,34 @@ function buildPrintHtml(rows: BarcodePrintRow[], title: string, options?: { oneG
       -webkit-box-orient: vertical;
       width: 100%;
     }
-    .barcode svg {
-      max-width: 92%;
+    .barcode {
+      flex: 1;
+      display: flex;
+      align-items: flex-end;
+      justify-content: center;
+      width: 100%;
+      min-height: 0;
+    }
+    .barcode-img {
+      display: block;
+      width: auto;
       height: auto;
+      max-width: 100%;
+      max-height: 15mm;
+      object-fit: contain;
+      image-rendering: -webkit-optimize-contrast;
+      image-rendering: crisp-edges;
     }
     @media print {
       body {
         background: #fff;
         -webkit-print-color-adjust: exact;
         print-color-adjust: exact;
+      }
+      .barcode-img {
+        max-width: 100%;
+        max-height: 15mm;
+        image-rendering: crisp-edges;
       }
       .print-pages {
         gap: 0;
@@ -381,17 +440,95 @@ function buildPrintHtml(rows: BarcodePrintRow[], title: string, options?: { oneG
 </html>`;
 }
 
-/** เปิดหน้าต่างพิมพ์ (A4) */
+export type BarcodePrintOptions = { oneGroupPerPage?: boolean };
+
+function writeHtmlToIframe(iframe: HTMLIFrameElement, html: string): Window | null {
+  const win = iframe.contentWindow;
+  const doc = win?.document;
+  if (!win || !doc) return null;
+  doc.open();
+  doc.write(html);
+  doc.close();
+  return win;
+}
+
+/** พิมพ์ผ่าน iframe ซ่อน — ไม่ต้องเปิด popup (มักถูกบล็อกบนมือถือ/Vercel) */
+export function printBarcodeLabels(
+  rows: BarcodePrintRow[],
+  title = 'ป้าย Barcode',
+  options?: BarcodePrintOptions
+): boolean {
+  if (rows.length === 0) return false;
+  const html = buildBarcodePrintHtml(rows, title, options);
+
+  const iframe = document.createElement('iframe');
+  iframe.setAttribute('title', title);
+  iframe.setAttribute('aria-hidden', 'true');
+  Object.assign(iframe.style, {
+    position: 'fixed',
+    right: '0',
+    bottom: '0',
+    width: '0',
+    height: '0',
+    border: '0',
+    opacity: '0',
+    pointerEvents: 'none',
+  });
+  document.body.appendChild(iframe);
+
+  const win = writeHtmlToIframe(iframe, html);
+  if (!win) {
+    iframe.remove();
+    return false;
+  }
+
+  const cleanup = () => {
+    window.setTimeout(() => iframe.remove(), 2000);
+  };
+
+  const doPrint = () => {
+    try {
+      win.focus();
+      win.print();
+      cleanup();
+    } catch {
+      cleanup();
+    }
+  };
+
+  iframe.onload = () => window.setTimeout(doPrint, 200);
+  window.setTimeout(doPrint, 400);
+
+  return true;
+}
+
+/** พิมพ์จาก iframe ที่มี HTML อยู่แล้ว (เช่น ตัวอย่างใน modal) */
+export function printBarcodeFromIframe(iframe: HTMLIFrameElement | null): boolean {
+  if (!iframe?.contentWindow) return false;
+  try {
+    iframe.contentWindow.focus();
+    iframe.contentWindow.print();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** เปิดหน้าต่างพิมพ์ (A4) — ลอง iframe ก่อน แล้วค่อย popup */
 export function openBarcodePrintPreview(
   rows: BarcodePrintRow[],
   title = 'ป้าย Barcode',
-  options?: { oneGroupPerPage?: boolean }
+  options?: BarcodePrintOptions
 ): void {
   if (rows.length === 0) return;
+  if (printBarcodeLabels(rows, title, options)) return;
+
   const html = buildBarcodePrintHtml(rows, title, options);
   const w = window.open('', '_blank', 'noopener,noreferrer');
   if (!w) {
-    alert('เบราว์เซอร์บล็อกหน้าต่างใหม่ — อนุญาต popup แล้วลองอีกครั้ง');
+    alert(
+      'พิมพ์ไม่สำเร็จ — ลองกด "ดาวน์โหลด Word" แล้วเปิดไฟล์จากนั้น หรืออนุญาต popup ของเว็บนี้แล้วลองอีกครั้ง'
+    );
     return;
   }
   w.document.write(html);
@@ -401,29 +538,3 @@ export function openBarcodePrintPreview(
   };
 }
 
-/** ดาวน์โหลดไฟล์ Word เปิดใน Word / Google Docs ได้ */
-export function downloadBarcodePrintDoc(
-  rows: BarcodePrintRow[],
-  filename?: string,
-  title = 'ป้าย Barcode',
-  options?: { oneGroupPerPage?: boolean }
-): void {
-  if (rows.length === 0) return;
-  const body = buildBarcodePrintHtml(rows, title, options);
-  const wordHtml = `\ufeff${body.replace(
-    '<html lang="th">',
-    '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" lang="th">'
-  )}`;
-
-  const blob = new Blob([wordHtml], {
-    type: 'application/msword;charset=utf-8',
-  });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download =
-    filename ??
-    `barcode-labels-${new Date().toISOString().slice(0, 10)}-${rows.length}.doc`;
-  a.click();
-  URL.revokeObjectURL(url);
-}
