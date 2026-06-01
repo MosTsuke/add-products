@@ -22,7 +22,6 @@ import { isManualQueueItem } from '@/lib/queueStatus';
 import {
   assignSequentialRunBarcodes,
   describeNextRunBarcode,
-  itemsWithoutBarcode,
   parseNewRunSerial,
   patchSingleRunBarcode,
   peekNextRunFromQueue,
@@ -143,8 +142,18 @@ export default function QueueTableView({
     [filteredDraft]
   );
 
+  /** แถวที่แสดงในตารางตอนนี้และยังไม่มี barcode — ใช้กับปุ่มสร้างทีละกลุ่ม */
+  const visibleWithoutBarcode = useMemo(
+    () => filteredDraft.filter(i => !i.barcode.trim()),
+    [filteredDraft]
+  );
+
   const canAddRow = tableFilter === 'all' || tableFilter === 'new';
-  const noBarcodeCount = itemsWithoutBarcode(draft).length;
+  const noBarcodeCount = visibleWithoutBarcode.length;
+  const barcodeGenScopedToTable =
+    tableFilter !== 'all' ||
+    tableSearch.trim() !== '' ||
+    filteredDraft.length < draft.length;
   const tableColSpan = TABLE_VIEW_COLUMN_INDICES.length + 3;
 
   const assignBarcode = (id: string) => {
@@ -157,18 +166,20 @@ export default function QueueTableView({
   };
 
   const assignAllMissingBarcodes = () => {
-    const empty = draft.filter(i => !i.barcode.trim());
-    const targets = sortBarcodeTargetsFromAnchor(draft, empty);
+    const targets = sortBarcodeTargetsFromAnchor(draft, visibleWithoutBarcode);
     const n = targets.length;
     if (n === 0) return;
     const nextStart = peekNextRunFromQueue(draft);
     const hasAnchor = draft.some(i => parseNewRunSerial(i.barcode) != null);
+    const scopeLine = barcodeGenScopedToTable
+      ? `เฉพาะ ${n} รายการที่แสดงในตารางตอนนี้ (ตาม filter/ค้นหา)`
+      : `ทุกแถวในคิวที่ยังไม่มี barcode (${n} รายการ)`;
     if (
       !window.confirm(
-        `สร้าง barcode ให้ ${n} รายการ?\n\nเริ่มที่ ${nextStart} แล้ว +1 ต่อเนื่อง\n${
+        `สร้าง barcode ให้ ${n} รายการ?\n\n${scopeLine}\n\nเริ่มที่ ${nextStart} แล้ว +1 ต่อเนื่อง\n${
           hasAnchor
             ? 'ต่อจากแถวที่มีเลขรันล่าสุด — แถวล่างก่อน แล้วแถวบน'
-            : 'ทุกแถวในคิว — แถวบนก่อน'
+            : 'แถวบนก่อน'
         }`
       )
     ) {
@@ -462,7 +473,7 @@ export default function QueueTableView({
                 <BarcodeGenButton
                   label={`สร้าง barcode (${noBarcodeCount})`}
                   onClick={assignAllMissingBarcodes}
-                  title="สร้างให้ทุกแถวที่ยังไม่มี barcode — ต่อจากเลขรันล่าสุด (ลงมาก่อน)"
+                  title="สร้างให้แถวที่แสดงในตารางและยังไม่มี barcode — ต่อจากเลขรันล่าสุด"
                 />
                 <span className="queue-table-gen-hint">{runHint}</span>
                 <button
