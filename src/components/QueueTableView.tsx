@@ -105,6 +105,9 @@ export default function QueueTableView({
   const [tableSearchField, setTableSearchField] = useState<QueueSearchFieldId>(
     DEFAULT_QUEUE_SEARCH_FIELD
   );
+  const [tableSearchRevision, setTableSearchRevision] = useState(0);
+  /** ปักแถวที่กำลังแก้ไขไว้ ไม่ให้หายจาก filter/search ระหว่างพิมพ์ */
+  const [pinnedRowId, setPinnedRowId] = useState<string | null>(null);
   const [runHintKey, setRunHintKey] = useState(0);
   const [categoryStoreFilter, setCategoryStoreFilter] = useState(0);
   const dirty = !queuesEqual(draft, savedSnapshot);
@@ -113,10 +116,13 @@ export default function QueueTableView({
     [draft, runHintKey]
   );
 
-  const filteredDraft = useMemo(
-    () => applyQueueFilters(draft, tableFilter, tableSearch, tableSearchField),
-    [draft, tableFilter, tableSearch, tableSearchField]
-  );
+  const filteredDraft = useMemo(() => {
+    const base = applyQueueFilters(draft, tableFilter, tableSearch, tableSearchField);
+    if (!pinnedRowId) return base;
+    if (base.some(i => i.id === pinnedRowId)) return base;
+    const pinned = draft.find(i => i.id === pinnedRowId);
+    return pinned ? [pinned, ...base] : base;
+  }, [draft, tableFilter, tableSearch, tableSearchField, tableSearchRevision, pinnedRowId]);
 
   /** ค่าจากไฟล์หลักตอนเปิดตาราง (ไม่เปลี่ยนระหว่างแก้ — เทียบกับ draft ทันที) */
   const fileBaselineById = useMemo(() => {
@@ -306,7 +312,10 @@ export default function QueueTableView({
             value={String(item[field] ?? '')}
             options={options}
             prependOptions={prepend}
-            onChange={v => updateField(item.id, field, v)}
+            onChange={v => {
+              setPinnedRowId(item.id);
+              updateField(item.id, field, v);
+            }}
             placeholder="เลือก…"
             inputTitle={cellHoverTitle(String(item[field] ?? ''))}
             optionMeta={field === 'category' ? categoryRefMap : undefined}
@@ -325,6 +334,7 @@ export default function QueueTableView({
               type="text"
               value={value}
               className="queue-csv-table-name-th-input"
+              onFocus={() => setPinnedRowId(item.id)}
               onChange={e => updateField(item.id, field, e.target.value)}
               aria-label={aria}
               title={cellHoverTitle(String(value))}
@@ -355,6 +365,7 @@ export default function QueueTableView({
               inputMode="numeric"
               autoComplete="off"
               spellCheck={false}
+              onFocus={() => setPinnedRowId(item.id)}
               onChange={e =>
                 handleBarcodeInputChange(e, v => updateField(item.id, 'barcode', v))
               }
@@ -383,6 +394,7 @@ export default function QueueTableView({
           inputMode={isBasePrice ? 'decimal' : undefined}
           value={value}
           className={isBasePrice ? 'queue-csv-table-base-price-input' : undefined}
+          onFocus={() => setPinnedRowId(item.id)}
           onChange={e => {
             const raw = e.target.value;
             updateField(item.id, field, isBasePrice ? sanitizeBasePriceInput(raw) : raw);
@@ -401,7 +413,7 @@ export default function QueueTableView({
 
   return (
     <div className="queue-table-view" role="dialog" aria-labelledby="queue-table-title">
-      <div className="queue-table-view-backdrop" onClick={tryClose} aria-hidden />
+      <div className="queue-table-view-backdrop" aria-hidden />
       <div className="queue-table-view-panel">
         <header className="queue-table-view-header">
           <div className="queue-table-view-title">
@@ -439,6 +451,7 @@ export default function QueueTableView({
               onFilterChange={setTableFilter}
               searchQuery={tableSearch}
               onSearchChange={setTableSearch}
+              onSearchSubmit={() => setTableSearchRevision(v => v + 1)}
               searchField={tableSearchField}
               onSearchFieldChange={setTableSearchField}
               filteredCount={filteredDraft.length}

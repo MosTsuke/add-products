@@ -17,6 +17,8 @@ interface QueueFilterBarProps {
   onFilterChange: (id: QueueFilterId) => void;
   searchQuery: string;
   onSearchChange: (query: string) => void;
+  /** กดค้นหาย้ำ (ไม่เปลี่ยน logic เดิม แค่บังคับ re-run ได้) */
+  onSearchSubmit?: () => void;
   searchField: QueueSearchFieldId;
   onSearchFieldChange: (field: QueueSearchFieldId) => void;
   filteredCount: number;
@@ -29,6 +31,7 @@ export default function QueueFilterBar({
   onFilterChange,
   searchQuery,
   onSearchChange,
+  onSearchSubmit,
   searchField,
   onSearchFieldChange,
   filteredCount,
@@ -82,6 +85,18 @@ export default function QueueFilterBar({
             </button>
           )}
         </label>
+        {onSearchSubmit && (
+          <button
+            type="button"
+            className="queue-filter-search-btn"
+            onClick={onSearchSubmit}
+            aria-label="ค้นหาย้ำ"
+            title="ค้นหาย้ำ"
+          >
+            <Search size={14} strokeWidth={2} aria-hidden />
+            ค้นหา
+          </button>
+        )}
       </div>
       <div className="queue-filter-chips">
         {QUEUE_FILTERS.map(f => {
