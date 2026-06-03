@@ -1,4 +1,9 @@
 import { normalizeBarcodeInput } from './barcodeInput';
+import {
+  FIXED_PRICE_EAN_PREFIX,
+  isFixedPriceEan13,
+  isLegacyPricePBarcode,
+} from './fixedPriceEan13';
 import { patchQueueItemField, QueueItem, storage } from './storage';
 
 /** prefix + เลขรัน 10 หลัก = 13 หลักเรียงต่อเนื่อง */
@@ -28,11 +33,12 @@ export function isGeneratedRunBarcode(barcode: string): boolean {
  */
 export function isProductPriceBarcode(barcode: string): boolean {
   const bc = normalizeBarcodeInput(barcode);
+  if (isFixedPriceEan13(bc)) return true;
   if (!bc.startsWith('P')) return false;
   if (isGeneratedRunBarcode(bc)) return false;
   const afterP = bc.slice(1);
   if (afterP.length > 0 && isGeneratedRunBarcode(afterP)) return false;
-  return true;
+  return isLegacyPricePBarcode(bc);
 }
 
 /** barcode ราคาที่ระบบสร้างใหม่ (200… หรือ P + 200…) */
@@ -46,6 +52,10 @@ export function isGeneratedPriceBarcode(barcode: string): boolean {
 export function parseProductPriceFromBarcode(barcode: string): number | null {
   const bc = normalizeBarcodeInput(barcode);
   if (!isProductPriceBarcode(bc)) return null;
+  if (bc.startsWith(FIXED_PRICE_EAN_PREFIX) && /^\d{13}$/.test(bc)) {
+    const value = parseInt(bc.slice(4, 8), 10);
+    return Number.isFinite(value) ? value : null;
+  }
   const digits = bc.slice(1);
   if (!/^\d+$/.test(digits)) return null;
   const value = parseInt(digits, 10);

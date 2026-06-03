@@ -1,4 +1,5 @@
 import { isGeneratedRunBarcode } from './barcodeGenerate';
+import { isProductPriceCategoryItem } from './fixedPriceEan13';
 import {
   buildCsvColsFromItem,
   CSV_HEADERS,
@@ -149,7 +150,8 @@ export type QueueFilterId =
   | 'unchanged'
   | 'edited'
   | 'no-barcode'
-  | 'generated-barcode';
+  | 'generated-barcode'
+  | 'price-category';
 
 export const QUEUE_FILTERS: { id: QueueFilterId; label: string }[] = [
   { id: 'all', label: 'ทั้งหมด' },
@@ -158,6 +160,7 @@ export const QUEUE_FILTERS: { id: QueueFilterId; label: string }[] = [
   { id: 'edited', label: 'เดิม (แก้แล้ว)' },
   { id: 'no-barcode', label: 'ไม่มี barcode' },
   { id: 'generated-barcode', label: 'barcode สร้างใหม่' },
+  { id: 'price-category', label: 'barcode กำหนดราคา' },
 ];
 
 /** รายการจากไฟล์ที่ค่าเปลี่ยนจากตอน import */
@@ -185,6 +188,8 @@ export function matchesQueueFilter(item: QueueItem, filter: QueueFilterId): bool
       return !item.barcode.trim();
     case 'generated-barcode':
       return isGeneratedRunBarcode(item.barcode);
+    case 'price-category':
+      return isProductPriceCategoryItem(item);
     default:
       return true;
   }
@@ -218,6 +223,7 @@ export function countByQueueFilter(items: QueueItem[]): Record<QueueFilterId, nu
     edited: 0,
     'no-barcode': 0,
     'generated-barcode': 0,
+    'price-category': 0,
   };
   for (const item of items) {
     if (matchesQueueFilter(item, 'new')) counts.new++;
@@ -225,6 +231,7 @@ export function countByQueueFilter(items: QueueItem[]): Record<QueueFilterId, nu
     if (matchesQueueFilter(item, 'edited')) counts.edited++;
     if (matchesQueueFilter(item, 'no-barcode')) counts['no-barcode']++;
     if (matchesQueueFilter(item, 'generated-barcode')) counts['generated-barcode']++;
+    if (matchesQueueFilter(item, 'price-category')) counts['price-category']++;
   }
   return counts;
 }

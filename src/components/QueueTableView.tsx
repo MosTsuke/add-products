@@ -30,6 +30,14 @@ import {
   syncBarcodeRunCounter,
 } from '@/lib/barcodeGenerate';
 import {
+  FIXED_PRICE_EAN_EXAMPLES,
+  FIXED_PRICE_EAN_HELP_LINES,
+  needsFixedPriceEan13Update,
+  patchFixedPriceEan13Barcodes,
+  resolveFixedPriceEan13ForItem,
+} from '@/lib/fixedPriceEan13';
+import { normalizeBarcodeInput } from '@/lib/barcodeInput';
+import {
   handleBarcodeInputChange,
   handleBarcodeInputKeyDown,
 } from '@/lib/barcodeInput';
@@ -154,6 +162,14 @@ export default function QueueTableView({
     tableFilter !== 'all' ||
     tableSearch.trim() !== '' ||
     filteredDraft.length < draft.length;
+
+  const fixedPriceConvertTargets = useMemo(
+    () => filteredDraft.filter(needsFixedPriceEan13Update),
+    [filteredDraft]
+  );
+  const fixedPriceConvertCount = fixedPriceConvertTargets.length;
+  const showFixedPriceGenBar = tableFilter === 'price-category' && fixedPriceConvertCount > 0;
+
   const tableColSpan = TABLE_VIEW_COLUMN_INDICES.length + 3;
 
   const assignBarcode = (id: string) => {
@@ -163,6 +179,33 @@ export default function QueueTableView({
       return next;
     });
     setRunHintKey(k => k + 1);
+  };
+
+  const assignFixedPriceEan13 = () => {
+    const targets = fixedPriceConvertTargets;
+    const n = targets.length;
+    if (n === 0) return;
+    const sample = targets[0]!;
+    const from = normalizeBarcodeInput(sample.barcode);
+    const previewTo = resolveFixedPriceEan13ForItem(sample);
+    const preview = previewTo ? `ตัวอย่าง ${from || '(ว่าง)'} → ${previewTo}` : '';
+    if (
+      !window.confirm(
+        `แปลง barcode เป็น EAN-13 กำหนดราคาให้ ${n} รายการ?\n\n` +
+          `จากรูปแบบ P ในช่อง (เช่น P0010 → 2999001000006)\n` +
+          `29 + 99 + ราคา 4 หลักหลัง P + 0000 + check digit\n` +
+          `เฉพาะหมวดหมู่ «ราคาสินค้า»\n\n${preview}`
+      )
+    ) {
+      return;
+    }
+    const { items, assigned, first, last } = patchFixedPriceEan13Barcodes(draft, targets);
+    setDraft(items);
+    if (assigned > 0 && first && last && first !== last) {
+      window.alert(`แปลงแล้ว ${assigned} รายการ\n${first} → ${last}`);
+    } else if (assigned > 0 && first) {
+      window.alert(`แปลงแล้ว ${assigned} รายการ\n${first}`);
+    }
   };
 
   const assignAllMissingBarcodes = () => {
@@ -468,31 +511,67 @@ export default function QueueTableView({
               filteredCount={filteredDraft.length}
               compact
             />
-            {noBarcodeCount > 0 && (
+            {tableFilter === 'price-category' && (
+              <div className="queue-table-fixed-price-help" role="note">
+                <p className="queue-table-fixed-price-help-title">วิธี gen barcode กำหนดราคา</p>
+                {FIXED_PRICE_EAN_HELP_LINES.map(line => (
+                  <p key={line} className="queue-table-fixed-price-help-line">
+                    {line}
+                  </p>
+                ))}
+                <ul className="queue-table-fixed-price-examples">
+                  {FIXED_PRICE_EAN_EXAMPLES.map(ex => (
+                    <li key={ex.p}>
+                      <code>{ex.p}</code>
+                      <span aria-hidden> → </span>
+                      <code>{ex.ean}</code>
+                      <span className="queue-table-fixed-price-examples-baht">({ex.baht} บาท)</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {(noBarcodeCount > 0 || showFixedPriceGenBar) && (
               <div className="queue-table-gen-bar">
-                <BarcodeGenButton
-                  label={`สร้าง barcode (${noBarcodeCount})`}
-                  onClick={assignAllMissingBarcodes}
-                  title="สร้างให้แถวที่แสดงในตารางและยังไม่มี barcode — ต่อจากเลขรันล่าสุด"
-                />
-                <span className="queue-table-gen-hint">{runHint}</span>
-                <button
-                  type="button"
-                  className="queue-table-reset-run"
-                  onClick={() => {
-                    if (
-                      window.confirm(
-                        'รีเซ็ตเลขรันเป็น 0?\nครั้งถัดไปจะได้ 2000000000001 (ถ้าในคิวยังไม่มีเลขรัน 200… ซ้ำ)'
-                      )
-                    ) {
-                      resetBarcodeRunCounter();
-                      syncBarcodeRunCounter(draft);
-                      setRunHintKey(k => k + 1);
-                    }
-                  }}
-                >
-                  รีเซ็ตเลขรัน
-                </button>
+                {noBarcodeCount > 0 && tableFilter !== 'price-category' && (
+                  <>
+                    <BarcodeGenButton
+                      label={`สร้าง barcode (${noBarcodeCount})`}
+                      onClick={assignAllMissingBarcodes}
+                      title="สร้างให้แถวที่แสดงในตารางและยังไม่มี barcode — ต่อจากเลขรันล่าสุด"
+                    />
+                    <span className="queue-table-gen-hint">{runHint}</span>
+                    <button
+                      type="button"
+                      className="queue-table-reset-run"
+                      onClick={() => {
+                        if (
+                          window.confirm(
+                            'รีเซ็ตเลขรันเป็น 0?\nครั้งถัดไปจะได้ 2000000000001 (ถ้าในคิวยังไม่มีเลขรัน 200… ซ้ำ)'
+                          )
+                        ) {
+                          resetBarcodeRunCounter();
+                          syncBarcodeRunCounter(draft);
+                          setRunHintKey(k => k + 1);
+                        }
+                      }}
+                    >
+                      รีเซ็ตเลขรัน
+                    </button>
+                  </>
+                )}
+                {showFixedPriceGenBar && (
+                  <>
+                    <BarcodeGenButton
+                      label={`gen barcode กำหนดราคา (${fixedPriceConvertCount})`}
+                      onClick={assignFixedPriceEan13}
+                      title="แปลงจาก P-code ในช่อง เช่น P0010 → 2999001000006"
+                    />
+                    <span className="queue-table-gen-hint">
+                      แปลงจาก P ในช่อง · ตัวอย่าง P0010 → 2999001000006
+                    </span>
+                  </>
+                )}
               </div>
             )}
           </div>

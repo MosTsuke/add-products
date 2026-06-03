@@ -27,6 +27,7 @@ import {
   printBarcodeFromIframe,
   printBarcodeLabels,
 } from '@/lib/barcodePrintSheet';
+import { isProductPriceCategoryItem } from '@/lib/fixedPriceEan13';
 import { QueueItem } from '@/lib/storage';
 
 type ListFilter = 'all' | 'generated' | 'from-file' | 'price' | 'selected';
@@ -65,7 +66,7 @@ function matchesListFilter(
 ): boolean {
   if (filter === 'selected') return selectedIds.has(item.id);
   if (filter === 'generated') return isGeneratedRunBarcode(item.barcode);
-  if (filter === 'price') return isProductPriceBarcode(item.barcode);
+  if (filter === 'price') return isProductPriceCategoryItem(item);
   if (filter === 'from-file') return !isGeneratedRunBarcode(item.barcode);
   return true;
 }
@@ -123,13 +124,13 @@ export default function BarcodePrintModal({
     setSelectedIds(new Set(defaultSelectedIds));
   }, [defaultSelectedIds]);
 
-  /** แท็บราคาสินค้า — ตัดรายการที่เลือกค้าง (เช่น 200…) ที่ไม่ใช่ราคาสินค้า */
+  /** แท็บราคาสินค้า — ตัดรายการที่เลือกค้างที่ไม่อยู่ในหมวดราคาสินค้า */
   useEffect(() => {
     if (listFilter !== 'price') return;
     setSelectedIds(prev => {
       const next = new Set<string>();
       for (const item of printable) {
-        if (prev.has(item.id) && isProductPriceBarcode(item.barcode)) {
+        if (prev.has(item.id) && isProductPriceCategoryItem(item)) {
           next.add(item.id);
         }
       }
@@ -273,7 +274,7 @@ export default function BarcodePrintModal({
 
   const selectProductPrice = () => {
     setSelectedIds(
-      new Set(printable.filter(i => isProductPriceBarcode(i.barcode)).map(i => i.id))
+      new Set(printable.filter(i => isProductPriceCategoryItem(i)).map(i => i.id))
     );
     setListFilter('price');
   };
@@ -298,7 +299,7 @@ export default function BarcodePrintModal({
   };
 
   const generatedCount = printable.filter(i => isGeneratedRunBarcode(i.barcode)).length;
-  const priceCount = printable.filter(i => isProductPriceBarcode(i.barcode)).length;
+  const priceCount = printable.filter(i => isProductPriceCategoryItem(i)).length;
   const fromFileCount = printable.length - generatedCount;
 
   const panelClass =
@@ -468,7 +469,7 @@ export default function BarcodePrintModal({
                     setSelectedIds(
                       new Set(
                         printable
-                          .filter(i => isProductPriceBarcode(i.barcode))
+                          .filter(i => isProductPriceCategoryItem(i))
                           .map(i => i.id)
                       )
                     );
@@ -539,7 +540,7 @@ export default function BarcodePrintModal({
                   {listFilter === 'selected'
                     ? 'ยังไม่มีรายการที่เลือก — ติ๊ก checkbox หรือเปลี่ยนตัวกรอง'
                     : listFilter === 'price'
-                      ? 'ไม่มีรายการที่ barcode ขึ้นต้นด้วย P'
+                      ? 'ไม่มีรายการในหมวดหมู่ ราคาสินค้า'
                       : 'ไม่พบรายการตามคำค้นหา/ตัวกรอง'}
                 </p>
               ) : (

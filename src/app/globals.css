@@ -1332,6 +1332,60 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   margin: 0 16px 12px;
 }
 
+.queue-table-fixed-price-help {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #f5f3ff;
+  border: 1px solid #e9e5ff;
+  font-size: 12px;
+  color: #4338ca;
+  line-height: 1.45;
+}
+
+.queue-table-fixed-price-help-title {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #3730a3;
+}
+
+.queue-table-fixed-price-help-line {
+  margin: 0 0 4px;
+  color: #4c4899;
+}
+
+.queue-table-fixed-price-examples {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+
+.queue-table-fixed-price-examples li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.queue-table-fixed-price-examples code {
+  font-size: 11px;
+  font-family: ui-monospace, monospace;
+  background: #fff;
+  border: 1px solid #ddd6fe;
+  border-radius: 4px;
+  padding: 1px 5px;
+  color: #312e81;
+}
+
+.queue-table-fixed-price-examples-baht {
+  font-size: 11px;
+  color: #6366f1;
+}
+
 .queue-table-gen-bar {
   display: flex;
   flex-wrap: wrap;
